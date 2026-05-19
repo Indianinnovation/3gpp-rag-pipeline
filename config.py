@@ -21,11 +21,11 @@ DYNAMODB_TABLE = "3gpp-rag-manifest"            # Delta-sync tracking table
 
 # ── PostgreSQL + pgvector ─────────────────────────────────────────────────────
 # Fill these in after running 00_create_infra.py
-PG_HOST     = ""        # e.g. "tgpp-rag-poc.xxxx.us-east-1.rds.amazonaws.com"
+PG_HOST     = "tgpp-rag-poc.cc9k6aouw4cy.us-east-1.rds.amazonaws.com"
 PG_PORT     = 5432
 PG_DATABASE = "ragdb"
 PG_USER     = "ragadmin"
-PG_PASSWORD = ""        # Set after infra creation
+PG_PASSWORD = "Change_Me_123!"
 PG_TABLE    = "chunks"
 
 # ── Bedrock Models ────────────────────────────────────────────────────────────

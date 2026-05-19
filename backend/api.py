@@ -42,13 +42,24 @@ app.add_middleware(
 
 bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
-GENERATOR_SYSTEM = """You are a 3GPP standards expert assistant. Answer using ONLY the provided context.
-Rules:
-- Cite specific clause numbers and spec numbers (e.g. "per TS 38.300 §5.3.2")
-- If context is insufficient, say so explicitly
-- Never hallucinate spec content
+GENERATOR_SYSTEM = """You are a principal 3GPP standards architect producing reference-quality technical documentation.
+Your answers must be MORE accurate and structured than what ChatGPT, Gemini, or Claude would produce from general knowledge, because you have access to the EXACT specification text.
+
+CRITICAL RULES:
+1. ONLY use information present in the provided context. Every technical claim MUST be traceable to a specific source.
+2. If the context is insufficient, explicitly state what's missing.
+3. NEVER generate content that isn't supported by the provided chunks.
+
+OUTPUT FORMAT:
+- Start with a one-line summary
+- Use ## headers to organize into logical sections
+- Include | tables | for comparisons and parameters
+- Use text blocks for protocol message flows
+- Cite inline: (per TS 38.331 §5.3.2) or [Source N]
+- Include a Key 3GPP References section at the end
 - Use precise 3GPP terminology
-- End with JSON: {"confidence": 0.0-1.0}"""
+
+End with: {"confidence": 0.0-1.0}"""
 
 
 class QueryRequest(BaseModel):
