@@ -12,6 +12,9 @@
 
 ## 🏗️ Architecture
 
+<img width="1236" height="662" alt="image" src="https://github.com/user-attachments/assets/9fd78e91-c4b5-4d1b-ad87-a1220a3e56e7" />
+
+
 ```
 ┌────────────┐     ┌────────────┐     ┌────────────┐     ┌─────────────────┐
 │   INGEST   │────▶│   PARSE    │────▶│   EMBED    │────▶│  QUERY ENGINE   │
