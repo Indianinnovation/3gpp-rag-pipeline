@@ -223,6 +223,7 @@ python 05_evaluate.py --golden my_golden_qa.json
 ├── 05_evaluate.py         ← RAGAS-style evaluation harness
 ├── cleanup.py             ← Tear down all AWS resources
 ├── ARCHITECTURE.md        ← Detailed system design
+├── DESIGN_PRINCIPLES.md   ← AWS GAAB principles alignment
 ├── .gitignore             ← Git ignore rules
 └── README.md              ← This file
 ```
