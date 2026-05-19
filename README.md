@@ -8,6 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
+<img width="1917" height="933" alt="image" src="https://github.com/user-attachments/assets/a24c8350-832a-4ec9-a3ca-1206f2d3c0c7" />
 
 ## 🏗️ Architecture
 
