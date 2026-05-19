@@ -223,6 +223,17 @@ python 05_evaluate.py --golden my_golden_qa.json
 ├── 04_query.py            ← LangGraph reasoning engine + CLI
 ├── 05_evaluate.py         ← RAGAS-style evaluation harness
 ├── cleanup.py             ← Tear down all AWS resources
+├── backend/
+│   ├── api.py             ← FastAPI REST server wrapping query engine
+│   └── requirements.txt   ← Backend dependencies (fastapi, uvicorn)
+├── frontend/
+│   ├── index.html         ← Entry HTML
+│   ├── package.json       ← Node.js dependencies
+│   ├── vite.config.js     ← Vite dev server + proxy config
+│   └── src/
+│       ├── main.jsx       ← React entry point
+│       ├── App.jsx        ← Chat UI component
+│       └── styles.css     ← Professional dark theme styles
 ├── ARCHITECTURE.md        ← Detailed system design
 ├── DESIGN_PRINCIPLES.md   ← AWS GAAB principles alignment
 ├── .gitignore             ← Git ignore rules
