@@ -1,0 +1,45 @@
+"""
+3GPP RAG POC — Central Configuration
+=====================================
+Copy this file to config.py and fill in your values after running 00_create_infra.py.
+
+    cp config.py.example config.py
+"""
+
+AWS_REGION = "us-east-1"
+
+# ── S3 ──────────────────────────────────────────────────────────────────────
+S3_LANDING_BUCKET   = "3gpp-rag-landing"       # Raw downloaded spec files
+S3_PROCESSED_BUCKET = "3gpp-rag-processed"     # Parsed chunk JSONL files
+
+# ── DynamoDB ─────────────────────────────────────────────────────────────────
+DYNAMODB_TABLE = "3gpp-rag-manifest"            # Delta-sync tracking table
+
+# ── PostgreSQL + pgvector ─────────────────────────────────────────────────────
+# Fill these in after running 00_create_infra.py
+PG_HOST     = ""        # e.g. "tgpp-rag-poc.xxxx.us-east-1.rds.amazonaws.com"
+PG_PORT     = 5432
+PG_DATABASE = "ragdb"
+PG_USER     = "ragadmin"
+PG_PASSWORD = ""        # Set after infra creation
+PG_TABLE    = "chunks"
+
+# ── Bedrock Models ────────────────────────────────────────────────────────────
+# Titan Embed v2 for vector embeddings (1024 dimensions)
+EMBED_MODEL_ID = "amazon.titan-embed-text-v2:0"
+# Claude Sonnet 4.5 for answer generation (inference profile)
+LLM_MODEL_ID   = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+# Claude Haiku 4.5 for metadata generation (inference profile)
+HAIKU_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+EMBED_DIM      = 1024
+
+# ── HTTPS Ingest ──────────────────────────────────────────────────────────────
+FTP_HOST      = "ftp.3gpp.org"
+FTP_BASE_PATH = "/Specs/latest_agreement/"
+TARGET_SERIES = ["38.3", "38.4", "38.5", "38.1"]
+MAX_FILES_POC = 20   # Cap for POC run — increase for full ingest
+
+# ── Chunking ──────────────────────────────────────────────────────────────────
+MAX_CHUNK_TOKENS     = 512   # Maximum tokens per chunk
+CHUNK_OVERLAP_TOKENS = 64    # Overlap between adjacent chunks
+MIN_CHUNK_TOKENS     = 50    # Discard fragments smaller than this
