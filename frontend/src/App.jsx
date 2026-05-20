@@ -227,6 +227,36 @@ function App() {
             />
           </div>
 
+          <div className="sidebar-section indexed-docs">
+            <h3>📂 Indexed Sources</h3>
+            <div className="indexed-list">
+              <div className="indexed-group">
+                <span className="indexed-badge meeting">Meetings</span>
+                <ul>
+                  <li>TSGR2_129 Docs + LS</li>
+                  <li>TSGR2_129bis Docs + LS</li>
+                  <li>TSGR_109 (RAN Plenary)</li>
+                </ul>
+              </div>
+              <div className="indexed-group">
+                <span className="indexed-badge specs">Specifications</span>
+                <ul>
+                  <li>Rel-18 / 38-series (NR)</li>
+                  <li>Rel-19 / 38-series (NR)</li>
+                  <li>Rel-20 / 38-series (NR)</li>
+                </ul>
+              </div>
+              <div className="indexed-group">
+                <span className="indexed-badge stats">Stats</span>
+                <ul>
+                  <li>40,000+ chunks indexed</li>
+                  <li>140+ spec files parsed</li>
+                  <li>Hybrid: vector + keyword</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
           <div className="sidebar-section">
             <h3>⚡ Quick Queries</h3>
             {SAMPLE_QUERIES.map((q, i) => (
