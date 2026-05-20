@@ -41,28 +41,23 @@ bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 GOLDEN_QA = [
     {
         "question": "What are the three RRC states in 5G NR?",
-        "ground_truth": "5G NR defines three RRC states: RRC_IDLE, RRC_INACTIVE, and RRC_CONNECTED. RRC_INACTIVE is a new state introduced in NR that was not present in LTE.",
-        "spec": "38300"
+        "ground_truth": "5G NR defines three RRC states: RRC_IDLE, RRC_INACTIVE, and RRC_CONNECTED. RRC_INACTIVE is a new state introduced in NR that was not present in LTE."
     },
     {
         "question": "What protocol does the UE use to request a paging response in RRC_IDLE?",
-        "ground_truth": "In RRC_IDLE, the UE monitors the paging channel and responds via a random access procedure on PRACH to initiate RRC connection establishment.",
-        "spec": "38300"
+        "ground_truth": "In RRC_IDLE, the UE monitors the paging channel and responds via a random access procedure on PRACH to initiate RRC connection establishment."
     },
     {
         "question": "What is the role of the AMF in 5G core network?",
-        "ground_truth": "The Access and Mobility Management Function (AMF) is responsible for UE registration, connection management, reachability management, and mobility management in the 5G Core network.",
-        "spec": "38300"
+        "ground_truth": "The Access and Mobility Management Function (AMF) is responsible for UE registration, connection management, reachability management, and mobility management in the 5G Core network."
     },
     {
         "question": "What is the difference between SA and NSA 5G deployments?",
-        "ground_truth": "SA (Standalone) uses a 5G NR air interface with a 5G Core, while NSA (Non-Standalone) uses 5G NR as a secondary cell anchored to an LTE primary cell with an EPC or 5GC core.",
-        "spec": "38300"
+        "ground_truth": "SA (Standalone) uses a 5G NR air interface with a 5G Core, while NSA (Non-Standalone) uses 5G NR as a secondary cell anchored to an LTE primary cell with an EPC or 5GC core."
     },
     {
         "question": "What is the maximum number of HARQ processes in NR downlink?",
-        "ground_truth": "NR supports up to 16 HARQ processes in the downlink, compared to 8 in LTE, providing greater scheduling flexibility.",
-        "spec": "38211"
+        "ground_truth": "NR supports up to 16 HARQ processes in the downlink, compared to 8 in LTE, providing greater scheduling flexibility."
     }
 ]
 

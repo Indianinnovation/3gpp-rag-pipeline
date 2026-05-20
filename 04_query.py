@@ -151,7 +151,10 @@ def reranker_node(state: RAGState) -> dict:
             seen.add(c["chunk_id"])
     # Top 20 chunks for maximum context coverage
     selected = deduped[:20]
-    print(f"  [reranker] Selected top {len(selected)} chunks (scores: {selected[0]['score']:.3f} → {selected[-1]['score']:.3f})")
+    if selected:
+        print(f"  [reranker] Selected top {len(selected)} chunks (scores: {selected[0]['score']:.3f} → {selected[-1]['score']:.3f})")
+    else:
+        print(f"  [reranker] No chunks found")
     return {"retrieved_chunks": selected}
 
 
