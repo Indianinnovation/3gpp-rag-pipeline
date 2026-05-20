@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -11,17 +11,79 @@ const SAMPLE_QUERIES = [
   "Describe the RRC connection setup procedure"
 ]
 
+const API_URL = 'https://klpvxq14qf.execute-api.us-east-1.amazonaws.com'
+
+// Streaming text hook — reveals text progressively
+function useStreamingText(text, speed = 8) {
+  const [displayed, setDisplayed] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const indexRef = useRef(0)
+  const intervalRef = useRef(null)
+
+  useEffect(() => {
+    if (!text) { setDisplayed(''); return }
+    setIsStreaming(true)
+    indexRef.current = 0
+    setDisplayed('')
+
+    intervalRef.current = setInterval(() => {
+      indexRef.current += speed
+      if (indexRef.current >= text.length) {
+        setDisplayed(text)
+        setIsStreaming(false)
+        clearInterval(intervalRef.current)
+      } else {
+        setDisplayed(text.slice(0, indexRef.current))
+      }
+    }, 16) // ~60fps
+
+    return () => clearInterval(intervalRef.current)
+  }, [text, speed])
+
+  const skipToEnd = useCallback(() => {
+    clearInterval(intervalRef.current)
+    setDisplayed(text)
+    setIsStreaming(false)
+  }, [text])
+
+  return { displayed, isStreaming, skipToEnd }
+}
+
+// Streaming message component
+function StreamingMessage({ content, onStreamEnd }) {
+  const { displayed, isStreaming, skipToEnd } = useStreamingText(content, 12)
+
+  useEffect(() => {
+    if (!isStreaming && content && onStreamEnd) onStreamEnd()
+  }, [isStreaming])
+
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {displayed}
+      </ReactMarkdown>
+      {isStreaming && (
+        <span className="streaming-cursor">▊</span>
+      )}
+      {isStreaming && (
+        <button className="skip-btn" onClick={skipToEnd}>Skip →</button>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [specFilter, setSpecFilter] = useState('')
   const [releaseFilter, setReleaseFilter] = useState('')
+  const [streamingIdx, setStreamingIdx] = useState(-1)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, streamingIdx])
 
   const sendQuery = async (query) => {
     if (!query.trim()) return
@@ -31,7 +93,7 @@ function App() {
     setLoading(true)
 
     try {
-      const res = await fetch('/query', {
+      const res = await fetch(`${API_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -48,14 +110,20 @@ function App() {
         confidence: data.confidence,
         latency_ms: data.latency_ms,
         chunks_retrieved: data.chunks_retrieved,
-        timestamp: new Date()
+        timestamp: new Date(),
+        isNew: true
       }
-      setMessages(prev => [...prev, assistantMsg])
+      setMessages(prev => {
+        const newMsgs = [...prev, assistantMsg]
+        setStreamingIdx(newMsgs.length - 1)
+        return newMsgs
+      })
     } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: `**Error:** ${err.message}\n\nMake sure the backend is running:\n\`\`\`bash\ncd backend && uvicorn api:app --reload --port 8000\n\`\`\``,
-        timestamp: new Date()
+        timestamp: new Date(),
+        isNew: true
       }])
     }
     setLoading(false)
@@ -66,7 +134,7 @@ function App() {
     sendQuery(input)
   }
 
-  const clearChat = () => setMessages([])
+  const clearChat = () => { setMessages([]); setStreamingIdx(-1) }
 
   return (
     <div className="app">
@@ -78,7 +146,7 @@ function App() {
             <span className="badge">Powered by Amazon Bedrock</span>
           </div>
           <div className="header-right">
-            <span className="status-badge">● 15K+ chunks indexed</span>
+            <span className="status-badge">● 40K+ chunks indexed</span>
             <button className="clear-btn" onClick={clearChat}>Clear Chat</button>
           </div>
         </div>
@@ -107,7 +175,7 @@ function App() {
           <div className="sidebar-section">
             <h3>⚡ Quick Queries</h3>
             {SAMPLE_QUERIES.map((q, i) => (
-              <button key={i} className="sample-btn" onClick={() => sendQuery(q)}>
+              <button key={i} className="sample-btn" onClick={() => sendQuery(q)} disabled={loading}>
                 <span className="sample-icon">→</span> {q}
               </button>
             ))}
@@ -116,22 +184,10 @@ function App() {
           <div className="sidebar-section">
             <h3>🏗️ Pipeline</h3>
             <div className="pipeline-steps">
-              <div className="step">
-                <span className="step-num">1</span>
-                <span>Query Decomposition</span>
-              </div>
-              <div className="step">
-                <span className="step-num">2</span>
-                <span>Multi-Query Retrieval</span>
-              </div>
-              <div className="step">
-                <span className="step-num">3</span>
-                <span>Score & Rerank</span>
-              </div>
-              <div className="step">
-                <span className="step-num">4</span>
-                <span>Expert Generation</span>
-              </div>
+              <div className="step"><span className="step-num">1</span><span>Query Decomposition</span></div>
+              <div className="step"><span className="step-num">2</span><span>Multi-Query Retrieval</span></div>
+              <div className="step"><span className="step-num">3</span><span>Score & Rerank</span></div>
+              <div className="step"><span className="step-num">4</span><span>Expert Generation</span></div>
             </div>
           </div>
 
@@ -154,21 +210,9 @@ function App() {
                 <h2>3GPP Specification Expert</h2>
                 <p>Ask any question about 5G NR, LTE, or 3GPP standards. Every answer is grounded in official specification text with exact clause citations.</p>
                 <div className="welcome-features">
-                  <div className="feature">
-                    <span>🎯</span>
-                    <strong>More Accurate</strong>
-                    <p>Than ChatGPT/Gemini — grounded in exact spec text</p>
-                  </div>
-                  <div className="feature">
-                    <span>📋</span>
-                    <strong>Structured</strong>
-                    <p>Tables, diagrams, protocol flows</p>
-                  </div>
-                  <div className="feature">
-                    <span>🔗</span>
-                    <strong>Traceable</strong>
-                    <p>Every claim linked to TS clause</p>
-                  </div>
+                  <div className="feature"><span>🎯</span><strong>More Accurate</strong><p>Than ChatGPT/Gemini — grounded in exact spec text</p></div>
+                  <div className="feature"><span>📋</span><strong>Structured</strong><p>Tables, diagrams, protocol flows</p></div>
+                  <div className="feature"><span>🔗</span><strong>Traceable</strong><p>Every claim linked to TS clause</p></div>
                 </div>
               </div>
             )}
@@ -181,17 +225,29 @@ function App() {
                 <div className="message-content">
                   <div className="message-bubble">
                     {msg.role === 'assistant' ? (
-                      <div className="markdown-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
+                      i === streamingIdx && msg.isNew ? (
+                        <StreamingMessage
+                          content={msg.content}
+                          onStreamEnd={() => {
+                            setMessages(prev => prev.map((m, idx) =>
+                              idx === i ? { ...m, isNew: false } : m
+                            ))
+                            setStreamingIdx(-1)
+                          }}
+                        />
+                      ) : (
+                        <div className="markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      )
                     ) : (
                       <p>{msg.content}</p>
                     )}
                   </div>
 
-                  {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
+                  {msg.role === 'assistant' && !msg.isNew && msg.citations && msg.citations.length > 0 && (
                     <div className="citations-panel">
                       <div className="citations-header">
                         <span>📚 Sources ({msg.citations.length})</span>
@@ -209,7 +265,7 @@ function App() {
                     </div>
                   )}
 
-                  {msg.role === 'assistant' && msg.confidence !== undefined && (
+                  {msg.role === 'assistant' && !msg.isNew && msg.confidence !== undefined && (
                     <div className="meta-bar">
                       <div className={`confidence-badge ${msg.confidence >= 0.7 ? 'high' : msg.confidence >= 0.4 ? 'medium' : 'low'}`}>
                         <span className="conf-dot"></span>
@@ -231,7 +287,7 @@ function App() {
                     <div className="loading-steps">
                       <div className="loading-step active">
                         <div className="pulse"></div>
-                        <span>Decomposing query → Retrieving from 15K chunks → Generating expert answer...</span>
+                        <span>Decomposing query → Retrieving from 40K chunks → Generating expert answer...</span>
                       </div>
                     </div>
                   </div>
@@ -251,11 +307,7 @@ function App() {
                 disabled={loading}
               />
               <button type="submit" disabled={loading || !input.trim()}>
-                {loading ? (
-                  <span className="btn-loading">⏳</span>
-                ) : (
-                  <span>Send</span>
-                )}
+                {loading ? <span className="btn-loading">⏳</span> : <span>Send</span>}
               </button>
             </div>
             <p className="input-hint">Grounded in official 3GPP specs • Zero hallucination • Exact clause citations</p>
