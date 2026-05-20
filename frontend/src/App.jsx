@@ -11,9 +11,12 @@ const SAMPLE_QUERIES = [
   "Describe the RRC connection setup procedure"
 ]
 
-const API_URL = 'https://klpvxq14qf.execute-api.us-east-1.amazonaws.com'
+const API_URL = 'https://api.ask3gpp.com'  // ECS Fargate backend
 
-// Streaming text hook — reveals text progressively
+const VALID_USER = 'admin'
+const VALID_PASS = 'admin@3gpp'
+
+// Streaming text hook
 function useStreamingText(text, speed = 8) {
   const [displayed, setDisplayed] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -35,7 +38,7 @@ function useStreamingText(text, speed = 8) {
       } else {
         setDisplayed(text.slice(0, indexRef.current))
       }
-    }, 16) // ~60fps
+    }, 16)
 
     return () => clearInterval(intervalRef.current)
   }, [text, speed])
@@ -49,7 +52,6 @@ function useStreamingText(text, speed = 8) {
   return { displayed, isStreaming, skipToEnd }
 }
 
-// Streaming message component
 function StreamingMessage({ content, onStreamEnd }) {
   const { displayed, isStreaming, skipToEnd } = useStreamingText(content, 12)
 
@@ -62,17 +64,66 @@ function StreamingMessage({ content, onStreamEnd }) {
       <ReactMarkdown remarkPlugins={[remarkGfm]}>
         {displayed}
       </ReactMarkdown>
-      {isStreaming && (
-        <span className="streaming-cursor">▊</span>
-      )}
-      {isStreaming && (
-        <button className="skip-btn" onClick={skipToEnd}>Skip →</button>
-      )}
+      {isStreaming && <span className="streaming-cursor">▊</span>}
+      {isStreaming && <button className="skip-btn" onClick={skipToEnd}>Skip →</button>}
+    </div>
+  )
+}
+
+// Login component
+function LoginPage({ onLogin }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+
+  const handleLogin = (e) => {
+    e.preventDefault()
+    if (username === VALID_USER && password === VALID_PASS) {
+      onLogin(true)
+    } else {
+      setError('Invalid credentials')
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <div className="login-card">
+        <div className="login-header">
+          <span className="login-icon">📡</span>
+          <h1>3GPP RAG Expert</h1>
+          <p>AI-Powered 3GPP Specification Search</p>
+        </div>
+        <form onSubmit={handleLogin}>
+          <div className="login-field">
+            <label>Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => { setUsername(e.target.value); setError('') }}
+              placeholder="Enter username"
+              autoFocus
+            />
+          </div>
+          <div className="login-field">
+            <label>Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError('') }}
+              placeholder="Enter password"
+            />
+          </div>
+          {error && <p className="login-error">{error}</p>}
+          <button type="submit" className="login-btn">Sign In</button>
+        </form>
+        <p className="login-footer">Powered by Amazon Bedrock • pgvector • LangGraph</p>
+      </div>
     </div>
   )
 }
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -135,6 +186,10 @@ function App() {
   }
 
   const clearChat = () => { setMessages([]); setStreamingIdx(-1) }
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={setIsAuthenticated} />
+  }
 
   return (
     <div className="app">

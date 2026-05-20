@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY backend/lambda/handler.py ./handler.py
+COPY backend/lambda/requirements.txt ./requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt uvicorn
+
+EXPOSE 8000
+
+CMD ["uvicorn", "handler:app", "--host", "0.0.0.0", "--port", "8000"]
