@@ -180,11 +180,11 @@ def hybrid_search(
         SELECT chunk_id, spec_number, release, section_path, doc_type,
                chunk_text, summary,
                (1 - (embedding <=> %s::vector)) AS vec_score,
-               ts_rank(to_tsvector('english', chunk_text), plainto_tsquery('english', %s)) AS text_score
+               COALESCE(ts_rank(to_tsvector('english', chunk_text), plainto_tsquery('english', %s)), 0) AS text_score
         FROM {PG_TABLE}
         {where}
         ORDER BY (0.7 * (1 - (embedding <=> %s::vector)) +
-                  0.3 * ts_rank(to_tsvector('english', chunk_text), plainto_tsquery('english', %s))) DESC
+                  0.3 * COALESCE(ts_rank(to_tsvector('english', chunk_text), plainto_tsquery('english', %s)), 0)) DESC
         LIMIT %s
     """
     all_params = [str(query_emb), query] + params + [str(query_emb), query, top_k]

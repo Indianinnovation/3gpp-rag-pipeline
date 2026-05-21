@@ -155,8 +155,8 @@ def reranker_node(state: RAGState) -> dict:
         if c["chunk_id"] not in seen:
             deduped.append(c)
             seen.add(c["chunk_id"])
-    # Top 20 chunks for maximum context coverage
-    selected = deduped[:20]
+    # Top 12 chunks for context (balanced speed vs coverage)
+    selected = deduped[:12]
     if selected:
         print(f"  [reranker] Selected top {len(selected)} chunks (scores: {selected[0]['score']:.3f} → {selected[-1]['score']:.3f})")
     else:
@@ -185,11 +185,18 @@ No markdown fences."""
 
 def evaluator_node(state: RAGState) -> dict:
     """CRAG Retrieval Evaluator — assesses if retrieved chunks can answer the query."""
-    print("  [evaluator] Assessing retrieval quality (CRAG) …")
     chunks = state.get("retrieved_chunks", [])
+
+    # Skip evaluation if top chunks have high scores (> 0.6)
+    valid_scores = [c.get("score", 0) for c in chunks if c.get("score", 0) == c.get("score", 0)]  # filter NaN
+    if valid_scores and max(valid_scores) >= 0.6:
+        print("  [evaluator] High-confidence retrieval (score > 0.6) — skipping evaluation")
+        return {"eval_result": "correct", "refined_query": state["user_query"]}
 
     if not chunks:
         return {"eval_result": "incorrect", "refined_query": state["user_query"]}
+
+    print("  [evaluator] Assessing retrieval quality (CRAG) …")
 
     top_chunks = chunks[:5]
     chunks_summary = "\n\n".join(
@@ -367,7 +374,7 @@ Remember: your advantage over generic AI is EXACT spec citations and ZERO halluc
         modelId=LLM_MODEL_ID,
         body=json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 4096,
+            "max_tokens": 2048,
             "system": GENERATOR_SYSTEM,
             "messages": [{"role": "user", "content": prompt}]
         }),
