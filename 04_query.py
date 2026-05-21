@@ -25,7 +25,7 @@ from typing import TypedDict, Optional
 import boto3
 from langgraph.graph import StateGraph, END
 
-from config import AWS_REGION, LLM_MODEL_ID
+from config import AWS_REGION, LLM_MODEL_ID, HAIKU_MODEL_ID
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,7 +37,10 @@ if not os.path.exists(embed_link):
 from embed_and_index import hybrid_search, get_pg_conn
 from auto_ingest import auto_ingest_spec
 
-bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+from botocore.config import Config
+
+bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION,
+                       config=Config(read_timeout=120))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,6 +55,8 @@ class RAGState(TypedDict):
     extracted_rel:    Optional[str]
     retrieved_chunks: list[dict]
     retrieval_hops:   int
+    eval_result:      str
+    refined_query:    str
     answer:           str
     citations:        list[dict]
     confidence:       float
@@ -157,6 +162,96 @@ def reranker_node(state: RAGState) -> dict:
     else:
         print(f"  [reranker] No chunks found")
     return {"retrieved_chunks": selected}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CRAG Retrieval Evaluator — judges if retrieved chunks are relevant
+# Based on: https://arxiv.org/html/2401.15884v3
+# ─────────────────────────────────────────────────────────────────────────────
+EVALUATOR_SYSTEM = """You are a retrieval quality evaluator for a 3GPP RAG system.
+Given a user question and retrieved document chunks, assess retrieval quality.
+
+Evaluate the TOP 5 chunks and classify the overall retrieval as:
+- "correct": At least 3 chunks are directly relevant and sufficient to answer the question
+- "ambiguous": 1-2 chunks are partially relevant but may not fully answer the question
+- "incorrect": No chunks contain information relevant to the question
+
+Also provide a refined query if the retrieval is ambiguous (rewrite to be more specific).
+
+Return ONLY valid JSON:
+{"evaluation": "correct"|"ambiguous"|"incorrect", "relevant_count": 0-5, "refined_query": "..."|null, "reason": "brief explanation"}
+No markdown fences."""
+
+
+def evaluator_node(state: RAGState) -> dict:
+    """CRAG Retrieval Evaluator — assesses if retrieved chunks can answer the query."""
+    print("  [evaluator] Assessing retrieval quality (CRAG) …")
+    chunks = state.get("retrieved_chunks", [])
+
+    if not chunks:
+        return {"eval_result": "incorrect", "refined_query": state["user_query"]}
+
+    top_chunks = chunks[:5]
+    chunks_summary = "\n\n".join(
+        f"[Chunk {i+1} | TS {c.get('spec_number','?')} §{c.get('section_path','?')} | score: {c.get('score',0):.3f}]\n{c['chunk_text'][:300]}"
+        for i, c in enumerate(top_chunks)
+    )
+
+    prompt = f"""Question: {state['user_query']}
+
+Retrieved chunks (top 5):
+{chunks_summary}
+
+Evaluate retrieval quality:"""
+
+    try:
+        resp = bedrock.invoke_model(
+            modelId=HAIKU_MODEL_ID,
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 256,
+                "system": EVALUATOR_SYSTEM,
+                "messages": [{"role": "user", "content": prompt}]
+            }),
+            contentType="application/json",
+            accept="application/json"
+        )
+        raw = json.loads(resp["body"].read())["content"][0]["text"].strip()
+        raw = re.sub(r"^```json\s*|\s*```$", "", raw)
+        result = json.loads(raw)
+
+        eval_result = result.get("evaluation", "correct")
+        refined_query = result.get("refined_query")
+        relevant_count = result.get("relevant_count", 0)
+        reason = result.get("reason", "")
+
+        print(f"    → {eval_result} ({relevant_count}/5 relevant) — {reason}")
+        return {"eval_result": eval_result, "refined_query": refined_query or state["user_query"]}
+    except Exception as e:
+        print(f"    ⚠ Evaluator error: {e}, defaulting to 'correct'")
+        return {"eval_result": "correct", "refined_query": state["user_query"]}
+
+
+def crag_router(state: RAGState) -> str:
+    """Routes based on CRAG evaluation."""
+    eval_result = state.get("eval_result", "correct")
+    hops = state.get("retrieval_hops", 0)
+    if eval_result == "correct":
+        return "generate"
+    elif eval_result == "ambiguous" and hops < 2:
+        return "refine"
+    else:
+        return "generate"
+
+
+def refiner_node(state: RAGState) -> dict:
+    """Refines the query and resets for re-retrieval."""
+    refined = state.get("refined_query", state["user_query"])
+    print(f"  [refiner] Query refined: '{refined}'")
+    return {
+        "sub_queries": [refined, state["user_query"]],
+        "retrieved_chunks": []
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -328,12 +423,22 @@ def create_engine(conn=None) -> "CompiledGraph":
     graph.add_node("planner",   planner_node)
     graph.add_node("retriever", lambda s: retriever_node(s, conn))
     graph.add_node("reranker",  reranker_node)
+    graph.add_node("evaluator", evaluator_node)
+    graph.add_node("refiner",   refiner_node)
     graph.add_node("generator", generator_node)
 
     graph.set_entry_point("planner")
     graph.add_edge("planner",   "retriever")
     graph.add_edge("retriever", "reranker")
-    graph.add_edge("reranker",  "generator")
+    graph.add_edge("reranker",  "evaluator")
+
+    # CRAG routing: evaluator decides next step
+    graph.add_conditional_edges("evaluator", crag_router, {
+        "generate": "generator",
+        "refine":   "refiner",
+    })
+    graph.add_edge("refiner", "retriever")
+
     graph.add_conditional_edges("generator", router_node, {
         "retry": "retriever",
         "low_confidence": END,
@@ -351,6 +456,7 @@ def run_query(engine, query: str, spec: str = None, release: str = None) -> dict
         "user_query": query, "spec_filter": spec, "release_filter": release,
         "sub_queries": [], "extracted_spec": spec, "extracted_rel": release,
         "retrieved_chunks": [], "retrieval_hops": 0,
+        "eval_result": "", "refined_query": "",
         "answer": "", "citations": [], "confidence": 0.0,
         "route": "", "hop_count": 0
     }
