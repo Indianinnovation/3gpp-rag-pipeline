@@ -286,6 +286,20 @@ function App() {
               <li>Verifiable sources</li>
             </ul>
           </div>
+
+          <div className="sidebar-section">
+            <h3>📜 Query History</h3>
+            <div className="history-list">
+              {messages.filter(m => m.role === 'user').length === 0 && (
+                <p className="history-empty">No queries yet</p>
+              )}
+              {messages.filter(m => m.role === 'user').slice(-10).reverse().map((m, i) => (
+                <button key={i} className="history-btn" onClick={() => sendQuery(m.content)} disabled={loading}>
+                  {m.content.length > 40 ? m.content.slice(0, 40) + '…' : m.content}
+                </button>
+              ))}
+            </div>
+          </div>
         </aside>
 
         <main className="chat-area">
