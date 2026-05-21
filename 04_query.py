@@ -35,6 +35,7 @@ if not os.path.exists(embed_link):
     os.symlink("03_embed_and_index.py", embed_link)
 
 from embed_and_index import hybrid_search, get_pg_conn
+from auto_ingest import auto_ingest_spec
 
 bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
@@ -206,7 +207,21 @@ def generator_node(state: RAGState) -> dict:
     MIN_RELEVANCE_SCORE = 0.35
     relevant_chunks = [c for c in chunks if c.get("score", 0) >= MIN_RELEVANCE_SCORE]
 
-    # If no relevant chunks found, return a helpful "not indexed" message
+    # If no relevant chunks found, try auto-ingesting needed specs
+    if not relevant_chunks:
+        print("  [generator] No relevant chunks — attempting auto-ingest …")
+        chunks_added, specs_ingested = auto_ingest_spec(state["user_query"])
+
+        if chunks_added > 0:
+            # Re-run search with newly indexed content
+            print(f"  [generator] Auto-ingested {chunks_added} chunks from {specs_ingested}")
+            print(f"  [generator] Re-searching with new content …")
+            conn = get_pg_conn()
+            new_hits = hybrid_search(state["user_query"], conn, top_k=20)
+            conn.close()
+            relevant_chunks = [c for c in new_hits if c.get("score", 0) >= MIN_RELEVANCE_SCORE]
+
+    # If still no relevant chunks after auto-ingest attempt
     if not relevant_chunks:
         answer = """## ⚠️ Document Not Indexed
 
