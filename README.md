@@ -43,6 +43,7 @@
 | Amazon RDS PostgreSQL + pgvector | Hybrid vector + keyword search | ~$0.50/day |
 | Amazon S3 | Raw + processed file storage | ~$0.05 |
 | Amazon DynamoDB | Delta sync manifest | ~$0.01 |
+| Amazon Textract | PDF parsing fallback (OCR) | ~$0.01 |
 | **Total POC** | | **~$2–5** |
 
 ---
@@ -146,11 +147,22 @@ python 02_process_docs.py --limit 5
 ```
 
 What happens per spec:
-1. Unzip → find .docx inside
-2. Extract sections via heading styles + clause number detection
-3. Structure-aware chunking (512 tokens, 64 token overlap, table-aware)
-4. (Optional) Claude Haiku generates: summary + keywords + hypothetical questions
-5. Chunk JSONL uploaded to `s3://3gpp-rag-processed/chunks/`
+1. Unzip → find .docx or .pdf inside
+2. **.docx**: Extract sections via heading styles + clause number detection
+3. **.pdf**: PyMuPDF extracts text → if insufficient, falls back to Amazon Textract (OCR + layout)
+4. Structure-aware chunking (512 tokens, 64 token overlap, table-aware)
+5. (Optional) Claude Haiku generates: summary + keywords + hypothetical questions
+6. Chunk JSONL uploaded to `s3://3gpp-rag-processed/chunks/`
+
+**PDF Parsing Strategy:**
+```
+ZIP file
+  ├── .docx found → python-docx (heading styles, tables)
+  ├── .pdf found  → PyMuPDF (free, fast, text-based PDFs)
+  │                    ↓ if extracted text < 50 tokens
+  │                 → Amazon Textract (OCR, scanned docs, presentations)
+  └── neither     → skip
+```
 
 ### Step 4 — Embed & Index (~5–15 min)
 
@@ -283,8 +295,9 @@ python cleanup.py
 | `Malformed input request` (Titan Embed) | Chunk text is empty — handled automatically |
 | `Operation timed out` (PostgreSQL) | Large file — batching handles this automatically |
 | `Legacy model` error | Use inference profile IDs (e.g., `us.anthropic.claude-...`) |
-| `No .docx found` | ZIP contains PDF/other format — skipped automatically |
+| `No .docx found` | ZIP contains PDF — now handled by PyMuPDF/Textract |
 | FTP timeout | Pipeline uses HTTPS instead — no FTP needed |
+| PDF too short (presentations) | Auto-fallback to Amazon Textract |
 
 ---
 
