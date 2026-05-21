@@ -26,6 +26,8 @@ import boto3
 from langgraph.graph import StateGraph, END
 
 from config import AWS_REGION, LLM_MODEL_ID, HAIKU_MODEL_ID
+
+NOVA_PRO_MODEL_ID = "us.amazon.nova-pro-v1:0"
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -84,19 +86,18 @@ No markdown fences."""
 
 
 def planner_node(state: RAGState) -> dict:
-    print("  [planner] Decomposing query into sub-queries …")
+    print("  [planner] Decomposing query into sub-queries (Nova Pro) …")
     resp = bedrock.invoke_model(
-        modelId=LLM_MODEL_ID,
+        modelId=NOVA_PRO_MODEL_ID,
         body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 512,
-            "system": PLANNER_SYSTEM,
-            "messages": [{"role": "user", "content": state["user_query"]}]
+            "system": [{"text": PLANNER_SYSTEM}],
+            "messages": [{"role": "user", "content": [{"text": state["user_query"]}]}],
+            "inferenceConfig": {"maxTokens": 512}
         }),
         contentType="application/json",
         accept="application/json"
     )
-    raw = json.loads(resp["body"].read())["content"][0]["text"].strip()
+    raw = json.loads(resp["body"].read())["output"]["message"]["content"][0]["text"].strip()
     raw = re.sub(r"^```json\s*|\s*```$", "", raw)
 
     try:
