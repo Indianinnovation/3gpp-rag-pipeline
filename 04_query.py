@@ -200,10 +200,47 @@ def format_context(chunks: list[dict]) -> str:
 
 def generator_node(state: RAGState) -> dict:
     print("  [generator] Producing expert-level answer …")
-    context = format_context(state["retrieved_chunks"])
+    chunks = state["retrieved_chunks"]
+
+    # Filter out low-relevance chunks (score threshold)
+    MIN_RELEVANCE_SCORE = 0.35
+    relevant_chunks = [c for c in chunks if c.get("score", 0) >= MIN_RELEVANCE_SCORE]
+
+    # If no relevant chunks found, return a helpful "not indexed" message
+    if not relevant_chunks:
+        answer = """## ⚠️ Document Not Indexed
+
+I could not find relevant information in the currently indexed 3GPP specifications to answer this question.
+
+### Currently Indexed Sources:
+| Category | Documents |
+|----------|----------|
+| Meetings | TSGR2_129, TSGR2_129bis, TSGR_109 (RAN Plenary) |
+| Specifications | Rel-18/19/20 38-series (NR radio) |
+| Coverage | TS 38.211-38.331, 38.300, 38.321, 38.473, 38.523 |
+
+### To answer this question, you may need to ingest:
+- Additional 3GPP working group documents (SA1, SA2, RAN1, etc.)
+- Different release specifications
+- Meeting documents from other TSG meetings
+
+### How to add new sources:
+```bash
+python 01_ftp_crawler.py --source all --limit 50
+python 02_process_docs.py --limit 50 --skip-metadata
+python 03_embed_and_index.py
+```"""
+        return {
+            "answer": answer,
+            "citations": [],
+            "confidence": 0.0,
+            "route": "done"
+        }
+
+    context = format_context(relevant_chunks)
     question = state["user_query"]
 
-    prompt = f"""You have access to {len(state['retrieved_chunks'])} chunks from official 3GPP specifications.
+    prompt = f"""You have access to {len(relevant_chunks)} chunks from official 3GPP specifications.
 
 Context from 3GPP specifications:
 
@@ -247,7 +284,7 @@ Remember: your advantage over generic AI is EXACT spec citations and ZERO halluc
             "release": c.get("release"),
             "score": round(c.get("score", 0), 3)
         }
-        for c in state["retrieved_chunks"][:8]
+        for c in relevant_chunks[:8]
     ]
 
     return {
