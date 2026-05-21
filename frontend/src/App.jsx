@@ -372,9 +372,10 @@ function App() {
                     <div className="loading-steps">
                       <div className="loading-step active">
                         <div className="pulse"></div>
-                        <span>Decomposing query → Retrieving from 40K chunks → Generating expert answer...</span>
+                        <span>Searching 44K+ chunks → If not found, auto-downloading spec from 3gpp.org → Generating expert answer...</span>
                       </div>
                     </div>
+                    <p className="loading-note">First-time queries for new specs may take 2-3 min (auto-ingest). Subsequent queries are instant.</p>
                   </div>
                 </div>
               </div>

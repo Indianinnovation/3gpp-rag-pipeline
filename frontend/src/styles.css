@@ -700,6 +700,13 @@ body {
   50% { opacity: 1; transform: scale(1.2); }
 }
 
+.loading-note {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 8px;
+  font-style: italic;
+}
+
 /* ─── Input Area ─── */
 .input-area {
   padding: 14px 24px;
