@@ -142,7 +142,48 @@ class QueryResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": LLM_MODEL_ID, "chunks": "40K+"}
+    return {"status": "ok", "model": LLM_MODEL_ID, "chunks": "44K+"}
+
+
+@app.get("/admin/stats")
+def admin_stats():
+    """Admin dashboard — query usage statistics."""
+    conn = get_pg_conn()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM query_cache")
+    total_queries = cur.fetchone()[0]
+
+    cur.execute("SELECT SUM(access_count) FROM query_cache")
+    total_requests = cur.fetchone()[0] or 0
+
+    cur.execute("SELECT AVG(confidence) FROM query_cache")
+    avg_confidence = cur.fetchone()[0] or 0
+
+    cur.execute("SELECT query_text, confidence, access_count, created_at, last_accessed FROM query_cache ORDER BY last_accessed DESC LIMIT 20")
+    recent = [{
+        "query": r[0],
+        "confidence": r[1],
+        "times_asked": r[2],
+        "first_asked": r[3].isoformat() if r[3] else None,
+        "last_asked": r[4].isoformat() if r[4] else None
+    } for r in cur.fetchall()]
+
+    cur.execute("SELECT query_text, access_count FROM query_cache ORDER BY access_count DESC LIMIT 5")
+    top_queries = [{"query": r[0], "times_asked": r[1]} for r in cur.fetchall()]
+
+    cur.execute("SELECT COUNT(*) FROM chunks")
+    total_chunks = cur.fetchone()[0]
+
+    conn.close()
+    return {
+        "total_unique_queries": total_queries,
+        "total_requests": total_requests,
+        "avg_confidence": round(avg_confidence, 2),
+        "total_chunks_indexed": total_chunks,
+        "top_queries": top_queries,
+        "recent_queries": recent
+    }
 
 
 @app.post("/query", response_model=QueryResponse)
