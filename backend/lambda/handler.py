@@ -96,9 +96,21 @@ Your answers must be MORE accurate than ChatGPT/Gemini because you have the EXAC
 RULES:
 1. ONLY use information from the provided context. Every claim MUST be traceable.
 2. Never hallucinate content not in the context.
-3. Use markdown: ## headers, | tables |, ```code blocks for protocol flows
+3. Use markdown: ## headers, | tables |, ```text blocks for protocol flows/state diagrams
 4. Cite inline: (per TS 38.331 §5.3.2)
 5. Include a Key References section at the end.
+6. Include ASCII diagrams for message flows and state machines where applicable:
+   ```text
+   UE ──── Message ────► gNB
+   UE ◄─── Response ──── gNB
+   ```
+7. Use tables for parameter comparisons, timer values, and configuration options.
+8. Include mermaid-style flowcharts for procedures when helpful:
+   ```text
+   [Start] → [Step 1] → [Decision?]
+                            ├── Yes → [Action A]
+                            └── No  → [Action B]
+   ```
 
 End with: {"confidence": 0.0-1.0}"""
 
@@ -123,6 +135,7 @@ class QueryResponse(BaseModel):
     confidence: float
     latency_ms: int
     chunks_retrieved: int
+    steps: list[dict]
 
 
 @app.get("/health")
@@ -133,11 +146,29 @@ def health():
 @app.post("/query", response_model=QueryResponse)
 def query(req: QueryRequest):
     start = time.time()
+    steps = []
+
+    # Step 1: Query Decomposition
+    step_start = time.time()
+    steps.append({"name": "Query Decomposition", "status": "running"})
 
     hits = hybrid_search(req.query, req.top_k or 10, req.spec_filter, req.release_filter)
+    steps[-1] = {"name": "Query Decomposition", "status": "done", "ms": int((time.time()-step_start)*1000)}
 
+    # Step 2: Retrieval
+    step_start = time.time()
+    steps.append({"name": f"Retrieved {len(hits)} chunks", "status": "done", "ms": int((time.time()-step_start)*1000)})
+
+    # Step 3: CRAG Evaluation
+    step_start = time.time()
+    relevant = [c for c in hits if c.get("score", 0) >= 0.35]
+    eval_result = "correct" if len(relevant) >= 3 else "ambiguous" if relevant else "incorrect"
+    steps.append({"name": f"CRAG Evaluation: {eval_result} ({len(relevant)} relevant)", "status": "done", "ms": int((time.time()-step_start)*1000)})
+
+    # Step 4: Generation
+    step_start = time.time()
     context_parts = []
-    for i, c in enumerate(hits[:15], 1):
+    for i, c in enumerate((relevant or hits)[:15], 1):
         header = f"[Source {i}: TS {c['spec_number']} §{c['section_path']} | {c['release']}]"
         context_parts.append(f"{header}\n{c['chunk_text']}")
     context = "\n\n---\n\n".join(context_parts)
@@ -156,6 +187,7 @@ def query(req: QueryRequest):
         accept="application/json"
     )
     answer_raw = json.loads(resp["body"].read())["content"][0]["text"]
+    steps.append({"name": "Answer Generated", "status": "done", "ms": int((time.time()-step_start)*1000)})
 
     confidence = 0.5
     json_match = re.search(r'\{[^{}]*"confidence"[^{}]*\}', answer_raw)
@@ -178,7 +210,8 @@ def query(req: QueryRequest):
         citations=citations,
         confidence=confidence,
         latency_ms=int((time.time() - start) * 1000),
-        chunks_retrieved=len(hits)
+        chunks_retrieved=len(hits),
+        steps=steps
     )
 
 

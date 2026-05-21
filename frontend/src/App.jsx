@@ -161,6 +161,7 @@ function App() {
         confidence: data.confidence,
         latency_ms: data.latency_ms,
         chunks_retrieved: data.chunks_retrieved,
+        steps: data.steps || [],
         timestamp: new Date(),
         isNew: true
       }
@@ -331,6 +332,21 @@ function App() {
                       <p>{msg.content}</p>
                     )}
                   </div>
+
+                  {msg.role === 'assistant' && !msg.isNew && msg.steps && msg.steps.length > 0 && (
+                    <div className="steps-panel">
+                      <div className="steps-header">🔄 Pipeline Steps</div>
+                      <div className="steps-list">
+                        {msg.steps.map((step, j) => (
+                          <div key={j} className={`step-item ${step.status}`}>
+                            <span className="step-icon">{step.status === 'done' ? '✓' : '⏳'}</span>
+                            <span className="step-name">{step.name}</span>
+                            {step.ms !== undefined && <span className="step-time">{step.ms}ms</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {msg.role === 'assistant' && !msg.isNew && msg.citations && msg.citations.length > 0 && (
                     <div className="citations-panel">
