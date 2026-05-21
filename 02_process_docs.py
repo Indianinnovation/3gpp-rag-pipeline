@@ -29,6 +29,12 @@ import boto3
 import docx  # python-docx
 import tiktoken
 
+try:
+    import fitz  # PyMuPDF for PDF parsing
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
+
 from config import (
     AWS_REGION, S3_LANDING_BUCKET, S3_PROCESSED_BUCKET,
     DYNAMODB_TABLE, HAIKU_MODEL_ID,
@@ -39,6 +45,7 @@ s3     = boto3.client("s3",       region_name=AWS_REGION)
 ddb    = boto3.resource("dynamodb", region_name=AWS_REGION)
 table  = ddb.Table(DYNAMODB_TABLE)
 bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+textract_client = boto3.client("textract", region_name=AWS_REGION)
 enc    = tiktoken.get_encoding("cl100k_base")
 
 
@@ -130,6 +137,108 @@ def table_to_markdown(tbl: docx.table.Table) -> str:
         if i == 0:
             rows.append("| " + " | ".join(["---"] * len(cells)) + " |")
     return "\n".join(rows)
+
+
+def extract_pdf_sections(pdf_bytes: bytes) -> list[Section]:
+    """Extract sections from a PDF using PyMuPDF."""
+    if not HAS_PDF:
+        return []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    sections: list[Section] = []
+    current: Optional[Section] = None
+
+    for page in doc:
+        blocks = page.get_text("dict")["blocks"]
+        for block in blocks:
+            if block["type"] != 0:  # text block only
+                continue
+            for line in block["lines"]:
+                text = "".join(span["text"] for span in line["spans"]).strip()
+                if not text:
+                    continue
+                # Detect headings by font size (>14pt) or bold
+                max_size = max(span["size"] for span in line["spans"])
+                is_bold = any("bold" in span.get("font", "").lower() for span in line["spans"])
+
+                if max_size >= 14 or (is_bold and max_size >= 12):
+                    m = CLAUSE_RE.match(text)
+                    number = m.group(1) if m else ""
+                    title = m.group(2) if m else text
+                    if current:
+                        sections.append(current)
+                    current = Section(number=number, title=title, depth=1, text="")
+                else:
+                    if current is None:
+                        current = Section(number="0", title="Introduction", depth=1, text="")
+                    current.text += f"\n{text}"
+
+    if current:
+        sections.append(current)
+    doc.close()
+    return sections
+
+
+def extract_pdf_with_textract(pdf_bytes: bytes, s3_key: str) -> list[Section]:
+    """Fallback: use Amazon Textract for complex/scanned PDFs."""
+    # Upload to S3 temporarily for Textract
+    temp_key = f"temp/textract/{uuid.uuid4()}.pdf"
+    s3.put_object(Bucket=S3_LANDING_BUCKET, Key=temp_key, Body=pdf_bytes)
+
+    try:
+        resp = textract_client.start_document_text_detection(
+            DocumentLocation={"S3Object": {"Bucket": S3_LANDING_BUCKET, "Name": temp_key}}
+        )
+        job_id = resp["JobId"]
+
+        # Wait for completion
+        while True:
+            result = textract_client.get_document_text_detection(JobId=job_id)
+            status = result["JobStatus"]
+            if status == "SUCCEEDED":
+                break
+            elif status == "FAILED":
+                print(f"    ⚠ Textract failed for {s3_key}")
+                return []
+            time.sleep(2)
+
+        # Collect all pages
+        full_text = ""
+        pages = [result]
+        while "NextToken" in result:
+            result = textract_client.get_document_text_detection(
+                JobId=job_id, NextToken=result["NextToken"]
+            )
+            pages.append(result)
+
+        for page in pages:
+            for block in page["Blocks"]:
+                if block["BlockType"] == "LINE":
+                    full_text += block["Text"] + "\n"
+
+        # Parse into sections
+        sections: list[Section] = []
+        current: Optional[Section] = None
+        for line in full_text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = CLAUSE_RE.match(line)
+            if m and len(line) < 100:  # Short lines with clause numbers = headings
+                if current:
+                    sections.append(current)
+                current = Section(number=m.group(1), title=m.group(2), depth=1, text="")
+            else:
+                if current is None:
+                    current = Section(number="0", title="Document", depth=1, text="")
+                current.text += f"\n{line}"
+
+        if current:
+            sections.append(current)
+        return sections
+
+    finally:
+        # Cleanup temp file
+        s3.delete_object(Bucket=S3_LANDING_BUCKET, Key=temp_key)
 
 
 def parse_metadata_from_filename(filename: str) -> dict:
@@ -318,17 +427,33 @@ def process_s3_key(s3_key: str, skip_metadata: bool = False) -> int:
 
     with zipfile.ZipFile(zip_bytes) as zf:
         docx_names = [n for n in zf.namelist() if n.lower().endswith(".docx")]
-        if not docx_names:
-            print(f"    ⚠ No .docx found in {filename}, skipping")
+        pdf_names = [n for n in zf.namelist() if n.lower().endswith(".pdf")]
+
+        if docx_names:
+            inner_name = docx_names[0]
+            with zf.open(inner_name) as f:
+                doc = docx.Document(io.BytesIO(f.read()))
+            sections = extract_docx_sections(doc)
+            print(f"    Parsed {len(sections)} sections from {inner_name}")
+        elif pdf_names and HAS_PDF:
+            inner_name = pdf_names[0]
+            with zf.open(inner_name) as f:
+                pdf_bytes = f.read()
+                sections = extract_pdf_sections(pdf_bytes)
+            print(f"    Parsed {len(sections)} sections from {inner_name} (PDF)")
+            # For short PDFs (presentations), merge all text into fewer sections
+            if sections and all(count_tokens(s.text) < MIN_CHUNK_TOKENS for s in sections):
+                merged_text = "\n".join(f"[{s.title}]\n{s.text}" for s in sections if s.text.strip())
+                if count_tokens(merged_text) < MIN_CHUNK_TOKENS:
+                    # PyMuPDF got too little text — fallback to Textract
+                    print(f"    ⚠ PyMuPDF insufficient, falling back to Textract...")
+                    sections = extract_pdf_with_textract(pdf_bytes, s3_key)
+                    print(f"    Textract extracted {len(sections)} sections")
+                else:
+                    sections = [Section(number="0", title=sections[0].title, depth=1, text=merged_text)]
+        else:
+            print(f"    ⚠ No .docx or .pdf found in {filename}, skipping")
             return 0
-
-        # Use first .docx (3GPP ZIPs typically contain one spec file)
-        inner_name = docx_names[0]
-        with zf.open(inner_name) as f:
-            doc = docx.Document(io.BytesIO(f.read()))
-
-        sections = extract_docx_sections(doc)
-        print(f"    Parsed {len(sections)} sections from {inner_name}")
 
         for section in sections:
             chunks = chunk_section(section, doc_meta, doc_id, s3_key)
@@ -345,6 +470,11 @@ def process_s3_key(s3_key: str, skip_metadata: bool = False) -> int:
             except Exception as e:
                 print(f"      Metadata error on chunk {i}: {e}")
             time.sleep(0.3)   # Haiku rate limit courtesy
+
+    if not all_chunks:
+        print(f"    ⚠ No chunks created (text too short), skipping")
+        mark_processed(s3_key)
+        return 0
 
     chunks_key = upload_chunks(all_chunks, doc_meta["spec_number"])
     mark_processed(s3_key)
