@@ -6,6 +6,7 @@ Uses Mangum to wrap FastAPI for Lambda + API Gateway.
 import json
 import re
 import time
+import hashlib
 import boto3
 import psycopg2
 from mangum import Mangum
@@ -136,6 +137,7 @@ class QueryResponse(BaseModel):
     latency_ms: int
     chunks_retrieved: int
     steps: list[dict]
+    cached: bool = False
 
 
 @app.get("/health")
@@ -147,6 +149,32 @@ def health():
 def query(req: QueryRequest):
     start = time.time()
     steps = []
+
+    # Step 0: Check cache
+    query_hash = hashlib.md5(f"{req.query}|{req.spec_filter}|{req.release_filter}".lower().strip().encode()).hexdigest()
+    try:
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT answer, citations, confidence, chunks_count FROM query_cache WHERE query_hash = %s", (query_hash,))
+        cached = cur.fetchone()
+        if cached:
+            # Update access count
+            cur.execute("UPDATE query_cache SET last_accessed = NOW(), access_count = access_count + 1 WHERE query_hash = %s", (query_hash,))
+            conn.commit()
+            conn.close()
+            steps.append({"name": "⚡ Cache Hit", "status": "done", "ms": int((time.time()-start)*1000)})
+            return QueryResponse(
+                answer=cached[0],
+                citations=[Citation(**c) for c in cached[1]],
+                confidence=cached[2],
+                latency_ms=int((time.time() - start) * 1000),
+                chunks_retrieved=cached[3],
+                steps=steps,
+                cached=True
+            )
+        conn.close()
+    except Exception:
+        pass
 
     # Step 1: Query Decomposition
     step_start = time.time()
@@ -205,13 +233,31 @@ def query(req: QueryRequest):
         for c in hits[:8]
     ]
 
+    # Save to cache
+    try:
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO query_cache (query_hash, query_text, answer, citations, confidence, chunks_count)
+                       VALUES (%s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (query_hash) DO UPDATE SET
+                           answer = EXCLUDED.answer, citations = EXCLUDED.citations,
+                           confidence = EXCLUDED.confidence, last_accessed = NOW()""",
+                    (query_hash, req.query, answer_raw,
+                     json.dumps([c.model_dump() for c in citations]),
+                     confidence, len(hits)))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
     return QueryResponse(
         answer=answer_raw,
         citations=citations,
         confidence=confidence,
         latency_ms=int((time.time() - start) * 1000),
         chunks_retrieved=len(hits),
-        steps=steps
+        steps=steps,
+        cached=False
     )
 
 

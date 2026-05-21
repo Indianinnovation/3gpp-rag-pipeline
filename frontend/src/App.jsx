@@ -162,6 +162,7 @@ function App() {
         latency_ms: data.latency_ms,
         chunks_retrieved: data.chunks_retrieved,
         steps: data.steps || [],
+        cached: data.cached || false,
         timestamp: new Date(),
         isNew: true
       }
@@ -382,6 +383,7 @@ function App() {
 
                   {msg.role === 'assistant' && !msg.isNew && msg.confidence !== undefined && (
                     <div className="meta-bar">
+                      {msg.cached && <span className="cache-badge">⚡ Cached</span>}
                       <div className={`confidence-badge ${msg.confidence >= 0.7 ? 'high' : msg.confidence >= 0.4 ? 'medium' : 'low'}`}>
                         <span className="conf-dot"></span>
                         Confidence: {Math.round(msg.confidence * 100)}%
