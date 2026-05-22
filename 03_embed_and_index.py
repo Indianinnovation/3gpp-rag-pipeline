@@ -92,11 +92,67 @@ def read_chunks_from_s3(s3_key: str) -> list[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# BUG 6 FIX: Metadata completeness validator
+# Rejects chunks with missing/invalid clause metadata at index time.
+# Chunks with clause="auto-ingested" or empty section_path cannot be
+# evaluated by IsREL or CRAG, causing unvalidatable noise in results.
+# ─────────────────────────────────────────────────────────────────────────────
+REJECTED_CHUNKS_LOG = "rejected_chunks.jsonl"
+
+
+def validate_chunk_metadata(chunk: dict) -> bool:
+    """Returns False if chunk has missing/invalid clause metadata.
+    
+    BUG 6 FIX: Prevents indexing chunks that CRAG and IsREL cannot evaluate.
+    Rejected chunks are logged to rejected_chunks.jsonl for manual review.
+    """
+    section_path = (chunk.get("section_path") or "").strip()
+    
+    # Reject if section_path is empty, null, or "auto-ingested"
+    if not section_path:
+        return False
+    if section_path.lower() in ("auto-ingested", "unknown", "none"):
+        return False
+    # Reject if section_path is just a number with no title
+    if section_path.isdigit():
+        return False
+    return True
+
+
+def log_rejected_chunk(chunk: dict, reason: str) -> None:
+    """Append rejected chunk info to log file for manual review."""
+    import os
+    entry = {
+        "chunk_id": chunk.get("chunk_id", "?"),
+        "spec_number": chunk.get("spec_number", "?"),
+        "section_path": chunk.get("section_path", "?"),
+        "reason": reason,
+        "text_preview": chunk.get("chunk_text", "")[:100]
+    }
+    with open(REJECTED_CHUNKS_LOG, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PostgreSQL indexing
 # ─────────────────────────────────────────────────────────────────────────────
 def index_chunks(conn, chunks: list[dict]) -> tuple[int, int]:
     # Filter out empty chunks
     chunks = [c for c in chunks if c.get("chunk_text", "").strip()]
+    
+    # BUG 6 FIX: Validate metadata completeness before indexing
+    valid_chunks = []
+    for c in chunks:
+        if validate_chunk_metadata(c):
+            valid_chunks.append(c)
+        else:
+            log_rejected_chunk(c, "invalid_section_path")
+    
+    if valid_chunks != chunks:
+        rejected_count = len(chunks) - len(valid_chunks)
+        print(f"    ⚠ Rejected {rejected_count} chunks with invalid metadata (logged to {REJECTED_CHUNKS_LOG})")
+    chunks = valid_chunks
+    
     if not chunks:
         return 0, 0
 

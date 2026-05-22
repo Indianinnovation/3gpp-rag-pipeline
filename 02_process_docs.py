@@ -260,6 +260,81 @@ def parse_metadata_from_filename(filename: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# BUG 1 FIX: ASN.1-aware chunker — keeps ENUMERATED/CHOICE blocks atomic
+# Without this, ASN.1 blocks spanning multiple pages get fragmented by the
+# heading-based splitter, and critical chunks like CauseRadioNetwork are lost.
+# ─────────────────────────────────────────────────────────────────────────────
+ASN1_BLOCK_RE = re.compile(
+    r'(?P<type_name>[A-Z][A-Za-z0-9-]+)\s*::=\s*(?P<asn1_type>ENUMERATED|CHOICE|SEQUENCE|INTEGER|BIT STRING)'
+    r'\s*\{(?P<body>[^}]*(?:\{[^}]*\}[^}]*)*)\}',
+    re.DOTALL
+)
+
+
+def extract_asn1_blocks(text: str, spec_number: str, clause: str) -> list[Chunk]:
+    """Extract complete ASN.1 type definitions as atomic chunks.
+    
+    BUG 1 FIX: Prevents fragmentation of ENUMERATED/CHOICE blocks that span
+    multiple pages. Each block becomes one chunk with rich metadata.
+    
+    Target chunks:
+      TS 38.413 §9.4.5: CauseRadioNetwork, CauseTransport, CauseNas, CauseProtocol, CauseMisc
+      TS 38.473 §9.3.1.2: Cause (F1AP)
+      TS 38.423 §9.2.3.2: Cause (XnAP)
+      TS 38.331 §5.3.10.4: RLF-Cause
+      TS 24.501 §9.11.3.2: 5GMM cause
+      TS 24.501 §9.11.4.2: 5GSM cause
+    """
+    chunks: list[Chunk] = []
+    
+    for match in ASN1_BLOCK_RE.finditer(text):
+        type_name = match.group("type_name")
+        asn1_type = match.group("asn1_type")
+        body = match.group("body").strip()
+        full_block = match.group(0)
+        
+        # Extract enumeration values if ENUMERATED or CHOICE
+        values = []
+        if asn1_type in ("ENUMERATED", "CHOICE"):
+            # Match comma-separated identifiers (with optional comments)
+            value_re = re.compile(r'([a-zA-Z][a-zA-Z0-9-]+)(?:\s*\(\d+\))?')
+            values = value_re.findall(body)
+        
+        # Build chunk text with context
+        chunk_text = (
+            f"[§{clause} | ASN.1 {asn1_type} Definition]\n\n"
+            f"{type_name} ::= {asn1_type} {{\n{body}\n}}"
+        )
+        
+        token_count = count_tokens(chunk_text)
+        if token_count < 10:  # Skip trivially small blocks
+            continue
+        
+        chunk = Chunk(
+            chunk_id=str(uuid.uuid4()),
+            doc_id=f"asn1-{spec_number}-{clause}",
+            spec_number=spec_number,
+            spec_series=spec_number[:2] + "series" if spec_number else "",
+            release="",  # Will be set by caller
+            section_path=f"{clause} {type_name} [ASN.1 {asn1_type}]",
+            doc_type="TS",
+            chunk_text=chunk_text,
+            token_count=token_count,
+            source_s3_key="",
+            summary=f"ASN.1 {asn1_type} definition of {type_name} with {len(values)} values",
+            keywords=[type_name, asn1_type, f"§{clause}"] + values[:10],
+            hyp_questions=[
+                f"What are the {type_name} values in 5G NR?",
+                f"What is the ASN.1 definition of {type_name}?",
+                f"List all {type_name} enumeration values",
+            ]
+        )
+        chunks.append(chunk)
+    
+    return chunks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Structure-aware chunker
 # ─────────────────────────────────────────────────────────────────────────────
 def count_tokens(text: str) -> int:
@@ -458,6 +533,20 @@ def process_s3_key(s3_key: str, skip_metadata: bool = False) -> int:
         for section in sections:
             chunks = chunk_section(section, doc_meta, doc_id, s3_key)
             all_chunks.extend(chunks)
+            
+            # BUG 1 FIX: Extract ASN.1 blocks as atomic chunks
+            # This ensures ENUMERATED/CHOICE blocks are never split across chunks
+            asn1_chunks = extract_asn1_blocks(
+                section.text, doc_meta["spec_number"],
+                f"{section.number} {section.title}".strip()
+            )
+            for ac in asn1_chunks:
+                ac.release = doc_meta["release"]
+                ac.source_s3_key = s3_key
+                ac.doc_id = doc_id
+            all_chunks.extend(asn1_chunks)
+            if asn1_chunks:
+                print(f"      → {len(asn1_chunks)} ASN.1 atomic chunks from §{section.number}")
 
     print(f"    Created {len(all_chunks)} chunks" + (" — generating metadata …" if not skip_metadata else " — skipping metadata"))
     if not skip_metadata:
