@@ -51,6 +51,17 @@ SPEC_SOURCES = [
     {"url": f"{BASE_URL}/Specs/latest/Rel-20/38_series/", "s3_prefix": "raw/specs/Rel-20/38_series"},
 ]
 
+# CR (Change Request) archive sources — contains per-release change descriptions
+# Each CR zip has the change description + affected clauses + release info
+CR_SOURCES = [
+    {"url": f"{BASE_URL}/Specs/archive/38_series/38.413/", "s3_prefix": "raw/cr/38413", "spec": "38413"},
+    {"url": f"{BASE_URL}/Specs/archive/38_series/38.473/", "s3_prefix": "raw/cr/38473", "spec": "38473"},
+    {"url": f"{BASE_URL}/Specs/archive/24_series/24.501/", "s3_prefix": "raw/cr/24501", "spec": "24501"},
+    {"url": f"{BASE_URL}/Specs/archive/38_series/38.331/", "s3_prefix": "raw/cr/38331", "spec": "38331"},
+    {"url": f"{BASE_URL}/Specs/archive/38_series/38.423/", "s3_prefix": "raw/cr/38423", "spec": "38423"},
+    {"url": f"{BASE_URL}/Specs/archive/38_series/38.463/", "s3_prefix": "raw/cr/38463", "spec": "38463"},
+]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTPS directory listing
@@ -137,8 +148,9 @@ def collect_files(sources: list[dict]) -> list[dict]:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--source", choices=["meetings", "specs", "all"], default="all")
+    parser.add_argument("--source", choices=["meetings", "specs", "cr", "all"], default="all")
     parser.add_argument("--limit", type=int, default=MAX_FILES_POC)
+    parser.add_argument("--spec-filter", type=str, default=None, help="Only crawl CRs for this spec (e.g. 38413)")
     args = parser.parse_args()
 
     sources = []
@@ -146,6 +158,11 @@ def main():
         sources += MEETING_SOURCES
     if args.source in ("specs", "all"):
         sources += SPEC_SOURCES
+    if args.source in ("cr", "all"):
+        cr_list = CR_SOURCES
+        if args.spec_filter:
+            cr_list = [s for s in CR_SOURCES if s["spec"] == args.spec_filter]
+        sources += cr_list
 
     print(f"\n3GPP HTTPS Crawler — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Sources: {args.source}")
