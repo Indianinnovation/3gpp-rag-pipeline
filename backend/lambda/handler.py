@@ -72,6 +72,7 @@ CAUSE_CLAUSE_BLACKLIST = [
     "9.3.3.60",    # V15-FIX-1: NGAP Resource Status table — not Cause IE
     "9.11.3.4",    # 5GS mobile identity — not a cause code
     "9.11.4.31",   # Received MBS container — not a cause code
+    "§8.1 Overview",  # V19: NAS overview section — not cause codes
 ]
 
 # Sections that should never rank high for cause code queries
@@ -720,7 +721,7 @@ def query_endpoint(req: QueryRequest):
     if query_type == "lookup":
         # Direct DB lookup + one vector search, merged
         direct_results = direct_lookup(req.query, req.spec_filter)
-        vector_hits = hybrid_search(req.query, req.top_k or 10, req.spec_filter, req.release_filter)
+        vector_hits = hybrid_search(req.query, 8, req.spec_filter, req.release_filter)  # V19: top_k=8
         seen = {c["chunk_id"] for c in direct_results}
         all_chunks = list(direct_results)
         for h in vector_hits:
@@ -732,7 +733,7 @@ def query_endpoint(req: QueryRequest):
         # RRF multi-query retrieval — OPTIMIZED: parallel embed + parallel DB
         search_tasks = []
         for q in sub_queries:
-            search_tasks.append((q, req.top_k or 10, req.spec_filter, req.release_filter))
+            search_tasks.append((q, 8, req.spec_filter, req.release_filter))  # V19: top_k=8
 
         # Targeted cause search (no spec filter)
         if not req.spec_filter:
