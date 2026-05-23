@@ -73,6 +73,7 @@ CAUSE_CLAUSE_BLACKLIST = [
     "9.11.3.4",    # 5GS mobile identity — not a cause code
     "9.11.4.31",   # Received MBS container — not a cause code
     "§8.1 Overview",  # V19: NAS overview section — not cause codes
+    "4.7.2.2",     # V19: Establishment cause for non-3GPP access — not cause codes
 ]
 
 # Sections that should never rank high for cause code queries
