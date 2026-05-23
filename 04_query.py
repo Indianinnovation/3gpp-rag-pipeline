@@ -463,7 +463,7 @@ def retriever_node(state: RAGState, conn) -> dict:
         direct_results = direct_lookup(state["user_query"], conn, user_spec)
         if direct_results:
             # Also do one vector search for context
-            vector_hits = hybrid_search(state["user_query"], conn, top_k=10,
+            vector_hits = hybrid_search(state["user_query"], conn, top_k=8,  # V19: top_k=8
                                         spec_filter=user_spec, release_filter=release_filter)
             # Merge: direct results first (high score), then vector hits
             seen = {c["chunk_id"] for c in direct_results}
@@ -481,7 +481,7 @@ def retriever_node(state: RAGState, conn) -> dict:
 
     # Sub-query searches
     for q in state["sub_queries"]:
-        search_tasks.append((q, user_spec, release_filter, 10))
+        search_tasks.append((q, user_spec, release_filter, 8))  # V19: top_k=8
 
     # Targeted cause code searches — only when NO user spec filter is set
     cause_keywords = ["cause", "clear code", "release cause", "reject", "failure cause"]
