@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useReducer } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -7,221 +7,70 @@ const SAMPLE_QUERIES = [
   "Explain handover procedure in NR",
   "What is carrier aggregation in NR?",
   "How does HARQ work in 5G?",
-  "Clear code classification in 5G NR",
+  "What is the role of gNB-DU and gNB-CU?",
   "Describe the RRC connection setup procedure"
 ]
 
-const API_URL = 'https://api.ask3gpp.com'
+const API_URL = 'https://api.ask3gpp.com'  // ECS Fargate backend
 
 const VALID_USER = 'admin'
 const VALID_PASS = 'admin@3gpp'
 
-// ─── SSE State Machine ───────────────────────────────────────────────────────
-const STEP_ORDER = ['planner', 'router', 'isrel', 'crag', 'generator']
+// Streaming text hook
+function useStreamingText(text, speed = 8) {
+  const [displayed, setDisplayed] = useState('')
+  const [isStreaming, setIsStreaming] = useState(false)
+  const indexRef = useRef(0)
+  const intervalRef = useRef(null)
 
-const initialStreamState = {
-  status: 'idle', // idle | streaming | done
-  steps: {},
-  tokens: '',
-  sources: [],
-  confidence: null,
-  totalMs: null,
-  chunksUsed: null,
+  useEffect(() => {
+    if (!text) { setDisplayed(''); return }
+    setIsStreaming(true)
+    indexRef.current = 0
+    setDisplayed('')
+
+    intervalRef.current = setInterval(() => {
+      indexRef.current += speed
+      if (indexRef.current >= text.length) {
+        setDisplayed(text)
+        setIsStreaming(false)
+        clearInterval(intervalRef.current)
+      } else {
+        setDisplayed(text.slice(0, indexRef.current))
+      }
+    }, 16)
+
+    return () => clearInterval(intervalRef.current)
+  }, [text, speed])
+
+  const skipToEnd = useCallback(() => {
+    clearInterval(intervalRef.current)
+    setDisplayed(text)
+    setIsStreaming(false)
+  }, [text])
+
+  return { displayed, isStreaming, skipToEnd }
 }
 
-function streamReducer(state, action) {
-  switch (action.type) {
-    case 'RESET':
-      return { ...initialStreamState, status: 'streaming' }
-    case 'STEP_START':
-      return {
-        ...state,
-        steps: {
-          ...state.steps,
-          [action.step]: { status: 'running', label: action.label, icon: action.icon, detail: action.detail, ms: null }
-        }
-      }
-    case 'STEP_DONE':
-      return {
-        ...state,
-        steps: {
-          ...state.steps,
-          [action.step]: { ...state.steps[action.step], status: 'done', label: action.label, ms: action.ms, sourcesPreview: action.sourcesPreview, verdict: action.verdict }
-        }
-      }
-    case 'TOKEN':
-      return { ...state, tokens: state.tokens + action.text }
-    case 'DONE':
-      return { ...state, status: 'done', sources: action.sources, confidence: action.confidence, totalMs: action.total_ms, chunksUsed: action.chunks_used }
-    case 'ERROR':
-      return { ...state, status: 'done' }
-    default:
-      return state
-  }
-}
+function StreamingMessage({ content, onStreamEnd }) {
+  const { displayed, isStreaming, skipToEnd } = useStreamingText(content, 12)
 
-// ─── SSE Client Hook ─────────────────────────────────────────────────────────
-function useQueryStream() {
-  const [streamState, dispatch] = useReducer(streamReducer, initialStreamState)
-
-  const query = useCallback(async (text, specFilter, releaseFilter) => {
-    dispatch({ type: 'RESET' })
-
-    try {
-      const res = await fetch(`${API_URL}/query/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: text, spec_filter: specFilter || null, release_filter: releaseFilter || null })
-      })
-
-      if (!res.ok) {
-        // Fallback to non-streaming endpoint
-        const fallbackRes = await fetch(`${API_URL}/query`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: text, spec_filter: specFilter || null, release_filter: releaseFilter || null })
-        })
-        const data = await fallbackRes.json()
-        // Simulate steps from response
-        if (data.steps) {
-          for (const step of data.steps) {
-            dispatch({ type: 'STEP_DONE', step: step.name.split(':')[0].toLowerCase().replace(/[^a-z]/g, ''), label: step.name, ms: step.ms })
-          }
-        }
-        dispatch({ type: 'TOKEN', text: data.answer })
-        dispatch({ type: 'DONE', sources: data.citations || [], confidence: data.confidence, total_ms: data.latency_ms, chunks_used: data.chunks_retrieved })
-        return
-      }
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const event = JSON.parse(line.slice(6))
-              switch (event.type) {
-                case 'step_start':
-                  dispatch({ type: 'STEP_START', step: event.step, label: event.label, icon: event.icon, detail: event.detail })
-                  break
-                case 'step_done':
-                  dispatch({ type: 'STEP_DONE', step: event.step, label: event.label, ms: event.ms, sourcesPreview: event.sources_preview, verdict: event.verdict })
-                  break
-                case 'token':
-                  dispatch({ type: 'TOKEN', text: event.text })
-                  break
-                case 'done':
-                  dispatch({ type: 'DONE', sources: event.sources, confidence: event.confidence, total_ms: event.total_ms, chunks_used: event.chunks_used })
-                  break
-              }
-            } catch (e) { /* skip malformed events */ }
-          }
-        }
-      }
-    } catch (err) {
-      dispatch({ type: 'TOKEN', text: `**Error:** ${err.message}\n\nMake sure the backend is running.` })
-      dispatch({ type: 'ERROR' })
-    }
-  }, [])
-
-  return { streamState, query }
-}
-
-// ─── Pipeline Steps Component ────────────────────────────────────────────────
-function PipelineSteps({ steps, status, totalMs, sources }) {
-  const [collapsed, setCollapsed] = useState(false)
-
-  const stepEntries = STEP_ORDER.map(id => ({ id, ...(steps[id] || { status: 'pending' }) }))
-  const completedCount = stepEntries.filter(s => s.status === 'done').length
-  const specList = (sources || []).slice(0, 3).map(s => `TS ${s.spec}`).join(', ')
-  const moreCount = (sources || []).length - 3
-
-  if (status === 'idle') return null
+  useEffect(() => {
+    if (!isStreaming && content && onStreamEnd) onStreamEnd()
+  }, [isStreaming])
 
   return (
-    <div className="pipeline-panel">
-      <button className="pipeline-toggle" onClick={() => setCollapsed(!collapsed)}>
-        <span className="toggle-arrow">{collapsed ? '▶' : '▼'}</span>
-        <span className="toggle-label">
-          {status === 'done'
-            ? `${completedCount} steps · ${totalMs ? (totalMs / 1000).toFixed(1) + 's' : ''} · ${specList}${moreCount > 0 ? ` (+${moreCount})` : ''}`
-            : `Pipeline · running...`
-          }
-        </span>
-      </button>
-
-      {!collapsed && (
-        <div className="pipeline-steps-list">
-          {stepEntries.map(step => (
-            <div key={step.id} className={`pipeline-step ${step.status || 'pending'}`}>
-              <span className="step-status-icon">
-                {step.status === 'done' ? '✓' : step.status === 'running' ? <span className="pulse-dot" /> : '○'}
-              </span>
-              <span className="step-icon">{step.icon || '·'}</span>
-              <span className="step-label">{step.label || step.id}</span>
-              {step.ms != null && <span className="step-ms">{step.ms.toLocaleString()}ms</span>}
-              {step.verdict && <span className={`step-verdict ${step.verdict}`}>{step.verdict}</span>}
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {displayed}
+      </ReactMarkdown>
+      {isStreaming && <span className="streaming-cursor">▊</span>}
+      {isStreaming && <button className="skip-btn" onClick={skipToEnd}>Skip →</button>}
     </div>
   )
 }
 
-// ─── Sources Panel ───────────────────────────────────────────────────────────
-const SPEC_COLORS = {
-  '38331': '#3b82f6', '24501': '#8b5cf6', '38413': '#f97316',
-  '38473': '#10b981', '38423': '#14b8a6', '38463': '#ec4899',
-  '38.413': '#f97316', '38.473': '#10b981', '38.423': '#14b8a6',
-}
-
-function SourcesPanel({ sources }) {
-  if (!sources || sources.length === 0) return null
-  return (
-    <div className="sources-panel">
-      <div className="sources-header">📚 Sources ({sources.length})</div>
-      <div className="sources-grid">
-        {sources.map((s, i) => (
-          <div key={i} className="source-card" style={{ borderLeftColor: SPEC_COLORS[s.spec] || '#64748b' }}>
-            <div className="source-spec">TS {s.spec}</div>
-            <div className="source-clause">§{s.clause}</div>
-            <div className="source-meta">
-              <span className="source-release">{s.release}</span>
-              <span className="source-score">{(s.score * 100).toFixed(1)}%</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Confidence Badge ────────────────────────────────────────────────────────
-function ConfidenceBadge({ confidence, totalMs, chunksUsed }) {
-  if (confidence == null) return null
-  const pct = Math.round(confidence * 100)
-  const color = pct >= 70 ? '#10b981' : pct >= 40 ? '#f59e0b' : '#ef4444'
-  return (
-    <div className="confidence-bar">
-      <div className="confidence-gauge">
-        <div className="confidence-fill" style={{ width: `${pct}%`, backgroundColor: color }} />
-      </div>
-      <span className="confidence-text" style={{ color }}>Confidence: {pct}%</span>
-      {totalMs && <span className="meta-stat">⏱ {(totalMs / 1000).toFixed(1)}s</span>}
-      {chunksUsed && <span className="meta-stat">📄 {chunksUsed} chunks</span>}
-    </div>
-  )
-}
-
-// ─── Login ───────────────────────────────────────────────────────────────────
+// Login component
 function LoginPage({ onLogin }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -241,76 +90,104 @@ function LoginPage({ onLogin }) {
       <div className="login-card">
         <div className="login-header">
           <span className="login-icon">📡</span>
-          <h1>ask3gpp</h1>
+          <h1>3GPP RAG Expert</h1>
           <p>AI-Powered 3GPP Specification Search</p>
         </div>
         <form onSubmit={handleLogin}>
           <div className="login-field">
             <label>Username</label>
-            <input type="text" value={username} onChange={(e) => { setUsername(e.target.value); setError('') }} placeholder="Enter username" autoFocus />
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => { setUsername(e.target.value); setError('') }}
+              placeholder="Enter username"
+              autoFocus
+            />
           </div>
           <div className="login-field">
             <label>Password</label>
-            <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError('') }} placeholder="Enter password" />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError('') }}
+              placeholder="Enter password"
+            />
           </div>
           {error && <p className="login-error">{error}</p>}
           <button type="submit" className="login-btn">Sign In</button>
         </form>
-        <p className="login-footer">Grounded in official 3GPP specs • Zero hallucination • Exact clause citations</p>
+        <p className="login-footer">Powered by Amazon Bedrock • pgvector • LangGraph</p>
       </div>
     </div>
   )
 }
 
-// ─── Main App ────────────────────────────────────────────────────────────────
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
   const [specFilter, setSpecFilter] = useState('')
   const [releaseFilter, setReleaseFilter] = useState('')
-  const { streamState, query: streamQuery } = useQueryStream()
+  const [streamingIdx, setStreamingIdx] = useState(-1)
   const messagesEndRef = useRef(null)
-  const isStreaming = streamState.status === 'streaming'
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamState.tokens])
+  }, [messages, streamingIdx])
 
-  // When streaming completes, save to messages
-  useEffect(() => {
-    if (streamState.status === 'done' && streamState.tokens) {
-      // Clean confidence JSON from answer
-      let answer = streamState.tokens
-      const jsonMatch = answer.match(/\{[^{}]*"confidence"[^{}]*\}/)
-      if (jsonMatch) {
-        answer = answer.slice(0, answer.indexOf(jsonMatch[0])).trim()
+  const sendQuery = async (query) => {
+    if (!query.trim()) return
+    const userMsg = { role: 'user', content: query, timestamp: new Date() }
+    setMessages(prev => [...prev, userMsg])
+    setInput('')
+    setLoading(true)
+
+    try {
+      const res = await fetch(`${API_URL}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          spec_filter: specFilter || null,
+          release_filter: releaseFilter || null
+        })
+      })
+      const data = await res.json()
+      const assistantMsg = {
+        role: 'assistant',
+        content: data.answer,
+        citations: data.citations,
+        confidence: data.confidence,
+        latency_ms: data.latency_ms,
+        chunks_retrieved: data.chunks_retrieved,
+        steps: data.steps || [],
+        cached: data.cached || false,
+        timestamp: new Date(),
+        isNew: true
       }
-
+      setMessages(prev => {
+        const newMsgs = [...prev, assistantMsg]
+        setStreamingIdx(newMsgs.length - 1)
+        return newMsgs
+      })
+    } catch (err) {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: answer,
-        sources: streamState.sources,
-        confidence: streamState.confidence,
-        totalMs: streamState.totalMs,
-        chunksUsed: streamState.chunksUsed,
-        steps: streamState.steps,
-        timestamp: new Date()
+        content: `**Error:** ${err.message}\n\nMake sure the backend is running:\n\`\`\`bash\ncd backend && uvicorn api:app --reload --port 8000\n\`\`\``,
+        timestamp: new Date(),
+        isNew: true
       }])
     }
-  }, [streamState.status])
-
-  const sendQuery = async (queryText) => {
-    if (!queryText.trim() || isStreaming) return
-    setMessages(prev => [...prev, { role: 'user', content: queryText, timestamp: new Date() }])
-    setInput('')
-    streamQuery(queryText, specFilter, releaseFilter)
+    setLoading(false)
   }
 
   const handleSubmit = (e) => {
     e.preventDefault()
     sendQuery(input)
   }
+
+  const clearChat = () => { setMessages([]); setStreamingIdx(-1) }
 
   if (!isAuthenticated) {
     return <LoginPage onLogin={setIsAuthenticated} />
@@ -322,12 +199,12 @@ function App() {
         <div className="header-content">
           <div className="logo">
             <span className="logo-icon">📡</span>
-            <h1>ask3gpp</h1>
+            <h1>3GPP RAG Expert</h1>
             <span className="badge">Powered by Amazon Bedrock</span>
           </div>
           <div className="header-right">
             <span className="status-badge">● 40K+ chunks indexed</span>
-            <button className="clear-btn" onClick={() => setMessages([])}>Clear</button>
+            <button className="clear-btn" onClick={clearChat}>Clear Chat</button>
           </div>
         </div>
       </header>
@@ -337,69 +214,204 @@ function App() {
           <div className="sidebar-section">
             <h3>🔍 Filters</h3>
             <label>Spec Number</label>
-            <input type="text" placeholder="e.g. 38331" value={specFilter} onChange={(e) => setSpecFilter(e.target.value)} />
+            <input
+              type="text"
+              placeholder="e.g. 38331"
+              value={specFilter}
+              onChange={(e) => setSpecFilter(e.target.value)}
+            />
             <label>Release</label>
-            <input type="text" placeholder="e.g. Rel-18" value={releaseFilter} onChange={(e) => setReleaseFilter(e.target.value)} />
+            <input
+              type="text"
+              placeholder="e.g. Rel-18"
+              value={releaseFilter}
+              onChange={(e) => setReleaseFilter(e.target.value)}
+            />
+          </div>
+
+          <div className="sidebar-section indexed-docs">
+            <h3>📂 Indexed Sources</h3>
+            <div className="indexed-list">
+              <div className="indexed-group">
+                <span className="indexed-badge meeting">Meetings</span>
+                <ul>
+                  <li>TSGR2_129 Docs + LS</li>
+                  <li>TSGR2_129bis Docs + LS</li>
+                  <li>TSGR_109 (RAN Plenary)</li>
+                </ul>
+              </div>
+              <div className="indexed-group">
+                <span className="indexed-badge specs">Specifications</span>
+                <ul>
+                  <li>Rel-18 / 38-series (NR)</li>
+                  <li>Rel-19 / 38-series (NR)</li>
+                  <li>Rel-20 / 38-series (NR)</li>
+                </ul>
+              </div>
+              <div className="indexed-group">
+                <span className="indexed-badge stats">Stats</span>
+                <ul>
+                  <li>40,000+ chunks indexed</li>
+                  <li>140+ spec files parsed</li>
+                  <li>Hybrid: vector + keyword</li>
+                </ul>
+              </div>
+            </div>
           </div>
 
           <div className="sidebar-section">
             <h3>⚡ Quick Queries</h3>
             {SAMPLE_QUERIES.map((q, i) => (
-              <button key={i} className="sample-btn" onClick={() => sendQuery(q)} disabled={isStreaming}>
+              <button key={i} className="sample-btn" onClick={() => sendQuery(q)} disabled={loading}>
                 <span className="sample-icon">→</span> {q}
               </button>
             ))}
+          </div>
+
+          <div className="sidebar-section">
+            <h3>🏗️ Pipeline</h3>
+            <div className="pipeline-steps">
+              <div className="step"><span className="step-num">1</span><span>Query Decomposition</span></div>
+              <div className="step"><span className="step-num">2</span><span>Multi-Query Retrieval</span></div>
+              <div className="step"><span className="step-num">3</span><span>Score & Rerank</span></div>
+              <div className="step"><span className="step-num">4</span><span>Expert Generation</span></div>
+            </div>
+          </div>
+
+          <div className="sidebar-section advantage-box">
+            <h3>✅ vs Generic AI</h3>
+            <ul>
+              <li>Exact clause citations</li>
+              <li>Zero hallucination</li>
+              <li>Latest Rel-18/19/20</li>
+              <li>Verifiable sources</li>
+            </ul>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>📜 Query History</h3>
+            <div className="history-list">
+              {messages.filter(m => m.role === 'user').length === 0 && (
+                <p className="history-empty">No queries yet</p>
+              )}
+              {messages.filter(m => m.role === 'user').slice(-10).reverse().map((m, i) => (
+                <button key={i} className="history-btn" onClick={() => sendQuery(m.content)} disabled={loading}>
+                  {m.content.length > 40 ? m.content.slice(0, 40) + '…' : m.content}
+                </button>
+              ))}
+            </div>
           </div>
         </aside>
 
         <main className="chat-area">
           <div className="messages">
-            {messages.length === 0 && !isStreaming && (
+            {messages.length === 0 && (
               <div className="welcome">
                 <div className="welcome-icon">📡</div>
                 <h2>3GPP Specification Expert</h2>
                 <p>Ask any question about 5G NR, LTE, or 3GPP standards. Every answer is grounded in official specification text with exact clause citations.</p>
+                <div className="welcome-features">
+                  <div className="feature"><span>🎯</span><strong>More Accurate</strong><p>Than ChatGPT/Gemini — grounded in exact spec text</p></div>
+                  <div className="feature"><span>📋</span><strong>Structured</strong><p>Tables, diagrams, protocol flows</p></div>
+                  <div className="feature"><span>🔗</span><strong>Traceable</strong><p>Every claim linked to TS clause</p></div>
+                </div>
               </div>
             )}
 
             {messages.map((msg, i) => (
               <div key={i} className={`message ${msg.role}`}>
-                <div className="message-avatar">{msg.role === 'user' ? '👤' : '🤖'}</div>
+                <div className="message-avatar">
+                  {msg.role === 'user' ? '👤' : '🤖'}
+                </div>
                 <div className="message-content">
-                  {msg.role === 'user' ? (
-                    <p className="user-text">{msg.content}</p>
-                  ) : (
-                    <>
-                      {msg.steps && Object.keys(msg.steps).length > 0 && (
-                        <PipelineSteps steps={msg.steps} status="done" totalMs={msg.totalMs} sources={msg.sources} />
-                      )}
-                      <div className="markdown-body">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <div className="message-bubble">
+                    {msg.role === 'assistant' ? (
+                      i === streamingIdx && msg.isNew ? (
+                        <StreamingMessage
+                          content={msg.content}
+                          onStreamEnd={() => {
+                            setMessages(prev => prev.map((m, idx) =>
+                              idx === i ? { ...m, isNew: false } : m
+                            ))
+                            setStreamingIdx(-1)
+                          }}
+                        />
+                      ) : (
+                        <div className="markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      )
+                    ) : (
+                      <p>{msg.content}</p>
+                    )}
+                  </div>
+
+                  {msg.role === 'assistant' && !msg.isNew && msg.steps && msg.steps.length > 0 && (
+                    <div className="steps-panel">
+                      <div className="steps-header">🔄 Pipeline Steps</div>
+                      <div className="steps-list">
+                        {msg.steps.map((step, j) => (
+                          <div key={j} className={`step-item ${step.status}`}>
+                            <span className="step-icon">{step.status === 'done' ? '✓' : '⏳'}</span>
+                            <span className="step-name">{step.name}</span>
+                            {step.ms !== undefined && <span className="step-time">{step.ms}ms</span>}
+                          </div>
+                        ))}
                       </div>
-                      <SourcesPanel sources={msg.sources} />
-                      <ConfidenceBadge confidence={msg.confidence} totalMs={msg.totalMs} chunksUsed={msg.chunksUsed} />
-                    </>
+                    </div>
+                  )}
+
+                  {msg.role === 'assistant' && !msg.isNew && msg.citations && msg.citations.length > 0 && (
+                    <div className="citations-panel">
+                      <div className="citations-header">
+                        <span>📚 Sources ({msg.citations.length})</span>
+                      </div>
+                      <div className="citations-list">
+                        {msg.citations.map((c, j) => (
+                          <div key={j} className="citation-card">
+                            <span className="citation-spec">TS {c.spec}</span>
+                            <span className="citation-section">§{c.section}</span>
+                            <span className="citation-release">{c.release}</span>
+                            <span className="citation-score">{c.score}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.role === 'assistant' && !msg.isNew && msg.confidence !== undefined && (
+                    <div className="meta-bar">
+                      {msg.cached && <span className="cache-badge">⚡ Cached</span>}
+                      <div className={`confidence-badge ${msg.confidence >= 0.7 ? 'high' : msg.confidence >= 0.4 ? 'medium' : 'low'}`}>
+                        <span className="conf-dot"></span>
+                        Confidence: {Math.round(msg.confidence * 100)}%
+                      </div>
+                      <span className="meta-item">⏱ {msg.latency_ms}ms</span>
+                      <span className="meta-item">📄 {msg.chunks_retrieved} chunks</span>
+                    </div>
                   )}
                 </div>
               </div>
             ))}
 
-            {/* Live streaming message */}
-            {isStreaming && (
+            {loading && (
               <div className="message assistant">
                 <div className="message-avatar">🤖</div>
                 <div className="message-content">
-                  <PipelineSteps steps={streamState.steps} status="streaming" />
-                  {streamState.tokens && (
-                    <div className="markdown-body streaming">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamState.tokens}</ReactMarkdown>
-                      <span className="streaming-cursor">▊</span>
+                  <div className="message-bubble loading-bubble">
+                    <div className="loading-steps">
+                      <div className="loading-step active">
+                        <div className="pulse"></div>
+                        <span>Searching 44K+ chunks → If not found, auto-downloading spec from 3gpp.org → Generating expert answer...</span>
+                      </div>
                     </div>
-                  )}
+                    <p className="loading-note">First-time queries for new specs may take 2-3 min (auto-ingest). Subsequent queries are instant.</p>
+                  </div>
                 </div>
               </div>
             )}
-
             <div ref={messagesEndRef} />
           </div>
 
@@ -410,10 +422,10 @@ function App() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Ask about 3GPP specifications... (e.g. 'What is conditional handover in NR?')"
-                disabled={isStreaming}
+                disabled={loading}
               />
-              <button type="submit" disabled={isStreaming || !input.trim()}>
-                {isStreaming ? '⏳' : 'Send'}
+              <button type="submit" disabled={loading || !input.trim()}>
+                {loading ? <span className="btn-loading">⏳</span> : <span>Send</span>}
               </button>
             </div>
             <p className="input-hint">Grounded in official 3GPP specs • Zero hallucination • Exact clause citations</p>
