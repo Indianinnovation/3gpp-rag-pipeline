@@ -548,7 +548,7 @@ async def query_stream(req: QueryRequest):
                     search_tasks.append((pq, 8, req.spec_filter, req.release_filter))  # V15-FIX-3
             if not req.spec_filter and is_cause_query:
                 for spec in CAUSE_CODE_SPECS:
-                    search_tasks.append((query, 3, spec, None))  # V15: top_k=3 for latency
+                    search_tasks.append((query, 8, spec, None))  # V21: top_k=8 for coverage
 
             unique_queries = list(set(t[0] for t in search_tasks))
             embed_texts_batch(unique_queries)
