@@ -54,6 +54,16 @@ TELECOM_SYNONYMS = {
 
 # Only search specs that are known to have cause code content in the index
 CAUSE_CODE_SPECS = ["24501", "38331", "38473", "38463", "38423", "38.413"]
+# V15-FIX-2: Guaranteed retrieval of all 6 Cause IE specs regardless of planner phrasing
+CAUSE_CODE_PINNED_QUERIES = [
+    "5GMM cause values TS 24.501 §9.11.3.2 registration reject deregister",
+    "5GSM cause values TS 24.501 §9.11.4.2 PDU session reject LADN",
+    "NGAP Cause IE CauseRadioNetwork TS 38.413 §9.4.5 ENUMERATED",
+    "F1AP Cause IE TS 38.473 §9.3.1.2 radio network layer",
+    "XnAP Cause IE TS 38.423 §9.2.3.2 radio network",
+    "RLF cause determination TS 38.331 §5.3.10.4 t310 beamFailure",
+]
+
 
 # Clause blacklist: sections that RRF over-promotes for cause code queries
 # These are tangentially related but NOT the actual cause code definitions
@@ -66,6 +76,8 @@ CAUSE_CLAUSE_BLACKLIST = [
     "5.4.5.3",     # NAS transport procedures (not cause definitions)
     "G.1",         # TDD operating bands (RF, not protocol)
     "5.3.10.5",    # RLF report content (adjacent, not cause codes)
+    "9.3.4.2",     # V15-FIX-1: NGAP PDU Session table — not Cause IE
+    "9.3.3.60",    # V15-FIX-1: NGAP Resource Status table — not Cause IE
 ]
 
 # Sections that should never rank high for cause code queries
@@ -532,12 +544,15 @@ async def query_stream(req: QueryRequest):
         else:
             search_tasks = []
             for q in sub_queries:
-                search_tasks.append((q, req.top_k or 10, req.spec_filter, req.release_filter))
-            if not req.spec_filter:
-                cause_kws = ["cause", "clear code", "release cause", "reject", "failure"]
-                if any(kw in query.lower() for kw in cause_kws):
-                    for spec in CAUSE_CODE_SPECS:
-                        search_tasks.append((query, 8, spec, None))  # BUG-2-FIX
+                search_tasks.append((q, 8, req.spec_filter, req.release_filter))  # V15-FIX-3: top_k=8
+            # V15-FIX-2: Add pinned spec-clause queries for guaranteed coverage
+            is_cause_query = any(kw in query.lower() for kw in ["cause", "clear code", "release cause", "reject", "failure"])
+            if is_cause_query:
+                for pq in CAUSE_CODE_PINNED_QUERIES:  # V15-FIX-2
+                    search_tasks.append((pq, 8, req.spec_filter, req.release_filter))  # V15-FIX-3
+            if not req.spec_filter and is_cause_query:
+                for spec in CAUSE_CODE_SPECS:
+                    search_tasks.append((query, 8, spec, None))  # V15-FIX-3: top_k=8
 
             unique_queries = list(set(t[0] for t in search_tasks))
             embed_texts_batch(unique_queries)
