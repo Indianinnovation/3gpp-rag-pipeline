@@ -903,3 +903,60 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #374151; }
+
+
+/* Live Pipeline Steps */
+.live-pipeline {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: #0d1421;
+  border: 1px solid #1e2d45;
+  border-radius: 8px;
+  font-family: 'DM Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+.pipeline-header {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.live-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: #e2e8f0;
+}
+.live-step.running {
+  color: #00d4ff;
+  border-left: 2px solid #00d4ff;
+  padding-left: 8px;
+  animation: pulse-border 1.5s ease-in-out infinite;
+}
+.live-step.done {
+  color: #10b981;
+}
+.live-step .step-status-icon {
+  width: 16px;
+  text-align: center;
+}
+.live-step .step-time {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 11px;
+}
+.live-step .pulse-dot {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-border {
+  0%, 100% { border-left-color: #00d4ff; }
+  50% { border-left-color: #0d1421; }
+}

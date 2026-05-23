@@ -130,11 +130,14 @@ function App() {
   const [specFilter, setSpecFilter] = useState('')
   const [releaseFilter, setReleaseFilter] = useState('')
   const [streamingIdx, setStreamingIdx] = useState(-1)
+  const [liveSteps, setLiveSteps] = useState([])
+  const [liveTokens, setLiveTokens] = useState('')
+  const [isStreamActive, setIsStreamActive] = useState(false)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingIdx])
+  }, [messages, streamingIdx, liveTokens, liveSteps])
 
   const sendQuery = async (query) => {
     if (!query.trim()) return
@@ -142,9 +145,13 @@ function App() {
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setLoading(true)
+    setLiveSteps([])
+    setLiveTokens('')
+    setIsStreamActive(true)
 
     try {
-      const res = await fetch(`${API_URL}/query`, {
+      // Try SSE streaming endpoint first
+      const res = await fetch(`${API_URL}/query/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -153,30 +160,100 @@ function App() {
           release_filter: releaseFilter || null
         })
       })
-      const data = await res.json()
-      const assistantMsg = {
-        role: 'assistant',
-        content: data.answer,
-        citations: data.citations,
-        confidence: data.confidence,
-        latency_ms: data.latency_ms,
-        chunks_retrieved: data.chunks_retrieved,
-        steps: data.steps || [],
-        cached: data.cached || false,
-        timestamp: new Date(),
-        isNew: true
+
+      if (!res.ok || !res.body) {
+        // Fallback to non-streaming
+        const fallbackRes = await fetch(`${API_URL}/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, spec_filter: specFilter || null, release_filter: releaseFilter || null })
+        })
+        const data = await fallbackRes.json()
+        setIsStreamActive(false)
+        const assistantMsg = {
+          role: 'assistant', content: data.answer, citations: data.citations,
+          confidence: data.confidence, latency_ms: data.latency_ms,
+          chunks_retrieved: data.chunks_retrieved, steps: data.steps || [],
+          cached: data.cached || false, timestamp: new Date(), isNew: true
+        }
+        setMessages(prev => { const n = [...prev, assistantMsg]; setStreamingIdx(n.length - 1); return n })
+        setLoading(false)
+        return
       }
-      setMessages(prev => {
-        const newMsgs = [...prev, assistantMsg]
-        setStreamingIdx(newMsgs.length - 1)
-        return newMsgs
-      })
+
+      // SSE streaming
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let allTokens = ''
+      let allSteps = []
+      let finalSources = []
+      let finalConfidence = 0.5
+      let finalMs = 0
+      let finalChunks = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const event = JSON.parse(line.slice(6))
+            switch (event.type) {
+              case 'step_start':
+                allSteps = [...allSteps, { name: event.label, icon: event.icon, status: 'running', detail: event.detail }]
+                setLiveSteps([...allSteps])
+                break
+              case 'step_done':
+                allSteps = allSteps.map(s => s.name === event.label || s.status === 'running'
+                  ? { ...s, name: event.label, status: 'done', ms: event.ms, detail: event.label }
+                  : s)
+                // Mark last running step as done
+                const lastRunning = allSteps.findLastIndex(s => s.status === 'running')
+                if (lastRunning >= 0) allSteps[lastRunning] = { ...allSteps[lastRunning], name: event.label, status: 'done', ms: event.ms }
+                setLiveSteps([...allSteps])
+                break
+              case 'token':
+                allTokens += event.text
+                setLiveTokens(allTokens)
+                break
+              case 'done':
+                finalSources = event.sources || []
+                finalConfidence = event.confidence
+                finalMs = event.total_ms
+                finalChunks = event.chunks_used
+                break
+            }
+          } catch (e) { /* skip malformed */ }
+        }
+      }
+
+      // Stream complete — save to messages
+      setIsStreamActive(false)
+      let answer = allTokens
+      const jsonMatch = answer.match(/\{[^{}]*"confidence"[^{}]*\}/)
+      if (jsonMatch) answer = answer.slice(0, answer.indexOf(jsonMatch[0])).trim()
+
+      const assistantMsg = {
+        role: 'assistant', content: answer,
+        citations: finalSources.map(s => ({ spec: s.spec, section: s.clause, release: s.release, score: s.score })),
+        confidence: finalConfidence, latency_ms: finalMs, chunks_retrieved: finalChunks,
+        steps: allSteps.map(s => ({ name: s.name, status: s.status, ms: s.ms })),
+        cached: false, timestamp: new Date(), isNew: true
+      }
+      setMessages(prev => { const n = [...prev, assistantMsg]; setStreamingIdx(n.length - 1); return n })
+      setLiveSteps([])
+      setLiveTokens('')
+
     } catch (err) {
+      setIsStreamActive(false)
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: `**Error:** ${err.message}\n\nMake sure the backend is running:\n\`\`\`bash\ncd backend && uvicorn api:app --reload --port 8000\n\`\`\``,
-        timestamp: new Date(),
-        isNew: true
+        timestamp: new Date(), isNew: true
       }])
     }
     setLoading(false)
@@ -401,13 +478,40 @@ function App() {
                 <div className="message-avatar">🤖</div>
                 <div className="message-content">
                   <div className="message-bubble loading-bubble">
-                    <div className="loading-steps">
-                      <div className="loading-step active">
-                        <div className="pulse"></div>
-                        <span>Searching 44K+ chunks → If not found, auto-downloading spec from 3gpp.org → Generating expert answer...</span>
+                    {/* Live Pipeline Steps */}
+                    {liveSteps.length > 0 && (
+                      <div className="live-pipeline">
+                        <div className="pipeline-header">🔄 Pipeline Steps</div>
+                        {liveSteps.map((step, j) => (
+                          <div key={j} className={`live-step ${step.status}`}>
+                            <span className="step-status-icon">
+                              {step.status === 'done' ? '✓' : <span className="pulse-dot">⟳</span>}
+                            </span>
+                            <span className="step-icon">{step.icon}</span>
+                            <span className="step-name">{step.name}</span>
+                            {step.ms != null && <span className="step-time">{step.ms.toLocaleString()}ms</span>}
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                    <p className="loading-note">First-time queries for new specs may take 2-3 min (auto-ingest). Subsequent queries are instant.</p>
+                    )}
+                    {/* Live Token Stream */}
+                    {liveTokens && (
+                      <div className="markdown-body">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {liveTokens}
+                        </ReactMarkdown>
+                        <span className="streaming-cursor">▊</span>
+                      </div>
+                    )}
+                    {/* Initial loading state before first step arrives */}
+                    {!liveSteps.length && !liveTokens && (
+                      <div className="loading-steps">
+                        <div className="loading-step active">
+                          <div className="pulse"></div>
+                          <span>Connecting to pipeline...</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
