@@ -53,16 +53,9 @@ TELECOM_SYNONYMS = {
 }
 
 # Only search specs that are known to have cause code content in the index
-CAUSE_CODE_SPECS = ["24501", "38331", "38473", "38463", "38423", "38.413"]
-# V15-FIX-2: Guaranteed retrieval of all 6 Cause IE specs regardless of planner phrasing
-CAUSE_CODE_PINNED_QUERIES = [
-    "5GMM cause values TS 24.501 §9.11.3.2 registration reject deregister",
-    "5GSM cause values TS 24.501 §9.11.4.2 PDU session reject LADN",
-    "NGAP Cause IE CauseRadioNetwork TS 38.413 §9.4.5 ENUMERATED",
-    "F1AP Cause IE TS 38.473 §9.3.1.2 radio network layer",
-    "XnAP Cause IE TS 38.423 §9.2.3.2 radio network",
-    "RLF cause determination TS 38.331 §5.3.10.4 t310 beamFailure",
-]
+CAUSE_CODE_SPECS = ["24501", "38331", "38473", "38.413"]
+# V15-FIX-2: Pinned queries disabled for latency (browser times out at 120s)
+CAUSE_CODE_PINNED_QUERIES = []
 
 
 # Clause blacklist: sections that RRF over-promotes for cause code queries
@@ -71,19 +64,20 @@ CAUSE_CLAUSE_BLACKLIST = [
     "9.3.1.111",   # RRC Establishment Cause (not a "clear code" / cause IE)
     "4.5.6",       # Access category → RRC establishment cause mapping
     "5.6.1.4.1",   # CIoT narrow case (not general cause codes)
-    "3.2",         # Abbreviations section
     "9.11.3.39",   # Payload container (not a cause code)
     "5.4.5.3",     # NAS transport procedures (not cause definitions)
     "G.1",         # TDD operating bands (RF, not protocol)
     "5.3.10.5",    # RLF report content (adjacent, not cause codes)
     "9.3.4.2",     # V15-FIX-1: NGAP PDU Session table — not Cause IE
     "9.3.3.60",    # V15-FIX-1: NGAP Resource Status table — not Cause IE
+    "9.11.3.4",    # 5GS mobile identity — not a cause code
+    "9.11.4.31",   # Received MBS container — not a cause code
 ]
 
 # Sections that should never rank high for cause code queries
 SECTION_BLACKLIST_PATTERNS = ["change history", "abbreviations", "annex a", "annex b",
                               "0 introduction", "payload container", "unwanted emission",
-                              "operating band", "repeater type"]
+                              "operating band", "repeater type", "2 references", "2\treferences"]
 
 # Specs that are never relevant for cause code / protocol queries
 SPEC_BLACKLIST_FOR_CAUSE = ["38106", "38115", "38141", "38521", "38522", "38905", "38918"]
@@ -552,7 +546,7 @@ async def query_stream(req: QueryRequest):
                     search_tasks.append((pq, 8, req.spec_filter, req.release_filter))  # V15-FIX-3
             if not req.spec_filter and is_cause_query:
                 for spec in CAUSE_CODE_SPECS:
-                    search_tasks.append((query, 8, spec, None))  # V15-FIX-3: top_k=8
+                    search_tasks.append((query, 3, spec, None))  # V15: top_k=3 for latency
 
             unique_queries = list(set(t[0] for t in search_tasks))
             embed_texts_batch(unique_queries)
