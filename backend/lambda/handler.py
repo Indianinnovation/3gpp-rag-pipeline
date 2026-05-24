@@ -82,7 +82,8 @@ SECTION_BLACKLIST_PATTERNS = ["change history", "abbreviations", "annex a", "ann
                               "operating band", "repeater type", "2 references", "2\treferences"]
 
 # Specs that are never relevant for cause code / protocol queries
-SPEC_BLACKLIST_FOR_CAUSE = ["38106", "38115", "38141", "38521", "38522", "38905", "38918"]
+# RF/test specs that are never relevant for protocol queries (applies to ALL queries)
+SPEC_BLACKLIST_ALWAYS = ["38106", "38115", "38141", "38521", "38522", "38905", "38918"]
 
 PLANNER_SYSTEM = """You are a 3GPP specification query planner.
 
@@ -562,15 +563,21 @@ async def query_stream(req: QueryRequest):
             result_sets = [f.result() for f in futures]
             result_sets = [rs for rs in result_sets if rs]
 
+            # Always filter RF/test specs and generic sections
+            for i, rs in enumerate(result_sets):
+                result_sets[i] = [
+                    c for c in rs
+                    if c.get("spec_number", "") not in SPEC_BLACKLIST_ALWAYS
+                    and c.get("section_path", "") != "auto-ingested"
+                    and not any(pat in (c.get("section_path") or "").lower() for pat in SECTION_BLACKLIST_PATTERNS)
+                ]
+            # Additional clause blacklist for cause-code queries
             is_cause_query = any(kw in query.lower() for kw in ["cause", "clear code", "failure", "reject"])
             if is_cause_query:
                 for i, rs in enumerate(result_sets):
                     result_sets[i] = [
                         c for c in rs
                         if not any(bl in (c.get("section_path") or "") for bl in CAUSE_CLAUSE_BLACKLIST)
-                        and c.get("section_path", "") != "auto-ingested"
-                        and not any(pat in (c.get("section_path") or "").lower() for pat in SECTION_BLACKLIST_PATTERNS)
-                        and c.get("spec_number", "") not in SPEC_BLACKLIST_FOR_CAUSE
                     ]
 
             num_sets = len(result_sets)
@@ -766,7 +773,7 @@ def query_endpoint(req: QueryRequest):
                     if not any(bl in (c.get("section_path") or "") for bl in CAUSE_CLAUSE_BLACKLIST)
                     and c.get("section_path", "") != "auto-ingested"
                     and not any(pat in (c.get("section_path") or "").lower() for pat in SECTION_BLACKLIST_PATTERNS)
-                    and c.get("spec_number", "") not in SPEC_BLACKLIST_FOR_CAUSE
+                    and c.get("spec_number", "") not in SPEC_BLACKLIST_ALWAYS
                 ]
 
         all_chunks = reciprocal_rank_fusion(result_sets)
