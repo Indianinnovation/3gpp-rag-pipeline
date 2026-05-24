@@ -151,18 +151,26 @@ function App() {
 
     try {
       // Try SSE streaming endpoint first
-      const res = await fetch(`${API_URL}/query/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          spec_filter: specFilter || null,
-          release_filter: releaseFilter || null
+      let res
+      let useStream = false
+      try {
+        res = await fetch(`${API_URL}/query/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query,
+            spec_filter: specFilter || null,
+            release_filter: releaseFilter || null
+          })
         })
-      })
+        useStream = res.ok && res.body
+      } catch (e) {
+        useStream = false
+      }
 
-      if (!res.ok || !res.body) {
+      if (!useStream) {
         // Fallback to non-streaming
+        setLiveSteps([{ name: 'Processing query...', icon: '🔄', status: 'running' }])
         const fallbackRes = await fetch(`${API_URL}/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -177,6 +185,7 @@ function App() {
           cached: data.cached || false, timestamp: new Date(), isNew: true
         }
         setMessages(prev => { const n = [...prev, assistantMsg]; setStreamingIdx(n.length - 1); return n })
+        setLiveSteps([])
         setLoading(false)
         return
       }
