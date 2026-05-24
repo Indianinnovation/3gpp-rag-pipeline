@@ -764,16 +764,21 @@ def query_endpoint(req: QueryRequest):
         result_sets = [f.result() for f in futures]
         result_sets = [rs for rs in result_sets if rs]  # filter empty
 
-        # BUG 2 FIX: Apply clause blacklist BEFORE RRF scoring
+        # FIX-1: Always filter RF/test specs and generic sections (ALL queries)
+        for i, rs in enumerate(result_sets):
+            result_sets[i] = [
+                c for c in rs
+                if c.get("spec_number", "") not in SPEC_BLACKLIST_ALWAYS
+                and c.get("section_path", "") != "auto-ingested"
+                and not any(pat in (c.get("section_path") or "").lower() for pat in SECTION_BLACKLIST_PATTERNS)
+            ]
+        # FIX-1: Additional clause blacklist for cause-code queries only
         is_cause_query = any(kw in req.query.lower() for kw in ["cause", "clear code", "failure", "reject"])
         if is_cause_query:
             for i, rs in enumerate(result_sets):
                 result_sets[i] = [
                     c for c in rs
                     if not any(bl in (c.get("section_path") or "") for bl in CAUSE_CLAUSE_BLACKLIST)
-                    and c.get("section_path", "") != "auto-ingested"
-                    and not any(pat in (c.get("section_path") or "").lower() for pat in SECTION_BLACKLIST_PATTERNS)
-                    and c.get("spec_number", "") not in SPEC_BLACKLIST_ALWAYS
                 ]
 
         all_chunks = reciprocal_rank_fusion(result_sets)
