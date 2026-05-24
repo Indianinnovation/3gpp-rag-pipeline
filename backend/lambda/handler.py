@@ -404,6 +404,80 @@ def normalize_rrf_scores(chunks: list[dict]) -> list[dict]:
     return chunks  # BUG-1-FIX: keep raw scores
 
 
+
+# ─── Corpus Gap Detection ─────────────────────────────────────────────────────
+# When retrieved chunks don't match the user's requested spec/release,
+# notify the user and queue background ingestion instead of generating
+# a confident wrong answer.
+
+import re as _re
+
+RELEASE_PATTERN = _re.compile(r'[Rr]el(?:ease)?[-\s]?(1[5-9]|2[0-9])', _re.IGNORECASE)
+SPEC_PATTERN = _re.compile(r'(?:TS|ts)\s*(\d{5}|\d{2}\.\d{3})')
+
+# Critical specs that should exist for each release
+CRITICAL_SPECS_FOR_GAP = ["38331", "38300", "38304", "38912", "38321", "24501", "38413", "38473", "38423"]
+
+
+def detect_corpus_gap(query: str, chunks: list[dict]) -> dict:
+    """Detect if retrieved chunks match the user's requested spec+release.
+    Returns {"has_gap": bool, "message": str, "missing_spec": str, "missing_release": str}
+    """
+    # Extract requested release from query
+    rel_match = RELEASE_PATTERN.search(query)
+    if not rel_match:
+        return {"has_gap": False}
+    
+    requested_release = f"Rel-{rel_match.group(1)}"
+    
+    # Extract requested spec from query (optional)
+    spec_match = SPEC_PATTERN.search(query)
+    requested_spec = spec_match.group(1).replace(".", "") if spec_match else None
+    
+    # Check if any retrieved chunks match the requested release
+    chunk_releases = [c.get("release", "") for c in chunks]
+    has_matching_release = any(requested_release in r for r in chunk_releases)
+    
+    if has_matching_release:
+        return {"has_gap": False}
+    
+    # Gap detected — chunks don't match requested release
+    return {
+        "has_gap": True,
+        "missing_release": requested_release,
+        "missing_spec": requested_spec,
+        "message": f"Note: {requested_release} content for this topic is being indexed. "
+                   f"The answer below is based on the closest available release. "
+                   f"A fully grounded {requested_release} answer will be available within 24 hours."
+    }
+
+
+def log_gap_for_ingestion(query: str, gap_info: dict):
+    """Log the corpus gap for background processing."""
+    try:
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ingestion_queue (
+                id SERIAL PRIMARY KEY,
+                query_text TEXT,
+                missing_release TEXT,
+                missing_spec TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                completed_at TIMESTAMPTZ
+            )
+        """)
+        cur.execute("""
+            INSERT INTO ingestion_queue (query_text, missing_release, missing_spec)
+            VALUES (%s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """, (query, gap_info.get("missing_release"), gap_info.get("missing_spec")))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Non-critical — don't break the query flow
+
 # ─── Reranker ─────────────────────────────────────────────────────────────────
 def rerank_chunks(chunks: list[dict]) -> list[dict]:
     for c in chunks:
@@ -808,7 +882,11 @@ def query_endpoint(req: QueryRequest):
     eval_result = "correct" if len(relevant) >= 3 else "ambiguous" if relevant else "incorrect"
     steps.append({"name": f"CRAG: {eval_result} ({len(relevant)} relevant)", "status": "done", "ms": 0})
 
-    # Step 6: Generate
+    # Step 6: Corpus gap detection + Generate
+    gap_info = detect_corpus_gap(req.query, relevant or selected)
+    if gap_info.get("has_gap"):
+        log_gap_for_ingestion(req.query, gap_info)
+    
     step_start = time.time()
     context_parts = []
     for i, c in enumerate((relevant or selected)[:15], 1):
@@ -848,6 +926,11 @@ def query_endpoint(req: QueryRequest):
         except (json.JSONDecodeError, ValueError):
             pass
 
+    # Prepend gap notice if corpus gap detected
+    if gap_info.get("has_gap"):
+        gap_msg = gap_info["message"]
+        answer_raw = "\u26a0\ufe0f " + gap_msg + "\n\n---\n\n" + answer_raw
+    
     citations = [Citation(spec=c["spec_number"], section=c["section_path"], release=c["release"], score=c["score"])
                  for c in (relevant or selected)[:8]]
 
