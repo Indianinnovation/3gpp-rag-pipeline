@@ -1,0 +1,210 @@
+{
+  "gaps": [
+    {
+      "spec": "38331",
+      "desc": "RRC protocol",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38331-j20.zip"
+    },
+    {
+      "spec": "38331",
+      "desc": "RRC protocol",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38300",
+      "desc": "NR architecture",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38300-i90.zip"
+    },
+    {
+      "spec": "38300",
+      "desc": "NR architecture",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38304",
+      "desc": "Cell selection/reselection",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38304-i60.zip"
+    },
+    {
+      "spec": "38304",
+      "desc": "Cell selection/reselection",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38912",
+      "desc": "Study on NR",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38912-i00.zip"
+    },
+    {
+      "spec": "38912",
+      "desc": "Study on NR",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38321",
+      "desc": "MAC protocol",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38321-i90.zip"
+    },
+    {
+      "spec": "38321",
+      "desc": "MAC protocol",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38211",
+      "desc": "Physical channels",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38211-i90.zip"
+    },
+    {
+      "spec": "38211",
+      "desc": "Physical channels",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38211-j30.zip"
+    },
+    {
+      "spec": "38211",
+      "desc": "Physical channels",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "24501",
+      "desc": "NAS protocol",
+      "release": "Rel-19"
+    },
+    {
+      "spec": "24501",
+      "desc": "NAS protocol",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38413",
+      "desc": "NGAP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38413-j20.zip"
+    },
+    {
+      "spec": "38413",
+      "desc": "NGAP",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38473",
+      "desc": "F1AP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38473-j20.zip"
+    },
+    {
+      "spec": "38473",
+      "desc": "F1AP",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38423",
+      "desc": "XnAP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38423-j20.zip"
+    },
+    {
+      "spec": "38423",
+      "desc": "XnAP",
+      "release": "Rel-20"
+    },
+    {
+      "spec": "38463",
+      "desc": "E1AP",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38463-i00.zip"
+    },
+    {
+      "spec": "38463",
+      "desc": "E1AP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38463-j00.zip"
+    },
+    {
+      "spec": "38463",
+      "desc": "E1AP",
+      "release": "Rel-20"
+    }
+  ],
+  "available": [
+    {
+      "spec": "38331",
+      "desc": "RRC protocol",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38331-j20.zip"
+    },
+    {
+      "spec": "38300",
+      "desc": "NR architecture",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38300-i90.zip"
+    },
+    {
+      "spec": "38304",
+      "desc": "Cell selection/reselection",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38304-i60.zip"
+    },
+    {
+      "spec": "38912",
+      "desc": "Study on NR",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38912-i00.zip"
+    },
+    {
+      "spec": "38321",
+      "desc": "MAC protocol",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38321-i90.zip"
+    },
+    {
+      "spec": "38211",
+      "desc": "Physical channels",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38211-i90.zip"
+    },
+    {
+      "spec": "38211",
+      "desc": "Physical channels",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38211-j30.zip"
+    },
+    {
+      "spec": "38413",
+      "desc": "NGAP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38413-j20.zip"
+    },
+    {
+      "spec": "38473",
+      "desc": "F1AP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38473-j20.zip"
+    },
+    {
+      "spec": "38423",
+      "desc": "XnAP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38423-j20.zip"
+    },
+    {
+      "spec": "38463",
+      "desc": "E1AP",
+      "release": "Rel-18",
+      "s3_key": "raw/specs/Rel-18/38_series/38463-i00.zip"
+    },
+    {
+      "spec": "38463",
+      "desc": "E1AP",
+      "release": "Rel-19",
+      "s3_key": "raw/specs/Rel-19/38_series/38463-j00.zip"
+    }
+  ]
+}
