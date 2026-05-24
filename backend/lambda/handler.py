@@ -83,7 +83,7 @@ SECTION_BLACKLIST_PATTERNS = ["change history", "abbreviations", "annex a", "ann
 
 # Specs that are never relevant for cause code / protocol queries
 # RF/test specs that are never relevant for protocol queries (applies to ALL queries)
-SPEC_BLACKLIST_ALWAYS = ["38106", "38115", "38141", "38521", "38522", "38905", "38918"]
+SPEC_BLACKLIST_ALWAYS = ["38106", "38115", "38141", "38521", "38522", "38523", "38905", "38918"]
 
 PLANNER_SYSTEM = """You are a 3GPP specification query planner.
 
